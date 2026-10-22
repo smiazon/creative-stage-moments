@@ -26,6 +26,8 @@ const DEG = Math.PI / 180;
 function hueR(h) { h = ((h % 1) + 1) % 1; return Math.min(1, Math.max(0, Math.abs(h * 6 - 3) - 1)); }
 function hueG(h) { h = ((h % 1) + 1) % 1; return Math.min(1, Math.max(0, 2 - Math.abs(h * 6 - 2))); }
 function hueB(h) { h = ((h % 1) + 1) % 1; return Math.min(1, Math.max(0, 2 - Math.abs(h * 6 - 4))); }
+// a repeatable 0..1 from any number: the flicker motion's next spot, the flash pattern's next blade
+function rnd01(x) { const s = Math.sin(x * 12.9898) * 43758.5453; return s - Math.floor(s); }
 
 // ---------------------------------------------------------------------------
 // Beam cone shader. Cone apex at local origin, opening down -Y with unit
@@ -790,6 +792,13 @@ export class RigFX {
         case 'ballyhoo': out = 38 + Math.cos(t * 1.3 * side + ph) * 12; lat = Math.sin(t * 1.3 * side + ph) * 22; y = 0; break;
         case 'crossbeams': out = 36; lat = -side * (16 + Math.sin(t * 1.1) * 10); y = 0; break;
         case 'tiltwave': out = 20 + (0.5 + 0.5 * Math.sin(t * 1.6 - (i / n) * 6.2)) * 40; lat = 0; y = 0; break;
+        case 'circles': out = 36 + Math.cos(t * 1.6 + ph) * 6; lat = Math.sin(t * 1.6 + ph) * 6; y = 0; break;
+        case 'figure8': out = 34 + Math.sin(2 * (t * 0.8 + ph * 0.3)) * 8; lat = Math.sin(t * 0.8 + ph * 0.3) * 18; y = 0; break;
+        case 'converge': out = 26 + Math.sin(t * 0.6) * 6; lat = Math.sin(t * 0.45) * 8; y = 5; break;
+        case 'skyward': out = 4; lat = Math.sin(t * 0.5 + ph) * 3; y = 70; break;
+        case 'snake': out = 34 + Math.cos(t * 0.6 - (i / n) * 4) * 8; lat = Math.sin(t * 1.2 - (i / n) * 8) * 20; y = 0; break;
+        case 'stands': out = 52 + Math.sin(t * 0.3 + ph) * 6; lat = Math.sin(t * 0.4 + ph) * 26; y = 14; break;
+        case 'flicker': { const k = Math.floor(t * 2.5 + i * 0.37); out = 26 + rnd01(k * 7.1 + i) * 26; lat = (rnd01(k * 3.3 + i * 1.7) - 0.5) * 44; y = 0; break; }
         default: out = 44; lat = 0; y = 0;
       }
     }
@@ -852,6 +861,36 @@ export class RigFX {
           f.tx = -2 + (0.5 + 0.5 * Math.sin(t * 1.6 - (i / n) * 6.2)) * 34;
           f.ty = 0; f.tz = f.z * 1.3;
           break;
+        case 'circles':                    // every head draws its own ring on the floor
+          f.tx = 14 + Math.cos(t * 1.6 + ph) * 5;
+          f.ty = 0; f.tz = f.z * 1.4 + Math.sin(t * 1.6 + ph) * 5;
+          break;
+        case 'figure8':                    // a slow figure of eight across the floor
+          f.tx = 12 + Math.sin(2 * (t * 0.8 + ph * 0.3)) * 8;
+          f.ty = 0; f.tz = Math.sin(t * 0.8 + ph * 0.3) * 20;
+          break;
+        case 'converge':                   // every beam meets at one point in the air: a tunnel
+          f.tx = 14 + Math.sin(t * 0.6) * 6; f.ty = 5;
+          f.tz = Math.sin(t * 0.45) * 10;
+          break;
+        case 'skyward':                    // pillars of light straight up, barely drifting
+          f.tx = f.x + 5; f.ty = 70;
+          f.tz = f.z * 1.15 + Math.sin(t * 0.5 + ph) * 3;
+          break;
+        case 'snake':                      // a wave running along the rig and back
+          f.tx = 12 + Math.cos(t * 0.6 - (i / n) * 4) * 6;
+          f.ty = 0; f.tz = Math.sin(t * 1.2 - (i / n) * 8) * 22;
+          break;
+        case 'stands':                     // up into the seats, raking round the bowl
+          f.tx = 30 + Math.sin(t * 0.3 + ph) * 10; f.ty = 12;
+          f.tz = Math.sin(t * 0.4 + ph) * 30;
+          break;
+        case 'flicker': {                  // each head snaps to a new spot a few times a second
+          const k = Math.floor(t * 2.5 + i * 0.37);
+          f.tx = 6 + rnd01(k * 7.1 + i) * 24; f.ty = 0;
+          f.tz = (rnd01(k * 3.3 + i * 1.7) - 0.5) * 50;
+          break;
+        }
       }
     }
 
@@ -1219,14 +1258,27 @@ export class RigFX {
     const spreadW = Math.max(0.05, this.laserSpread ?? 1.5);
     const tilt = this.laserTilt ?? 0, pan = this.laserPan ?? 0;
     const sky = pat === 'sky';
+    // An end stage's lasers only ever play to the audience's half of the room:
+    // a blade that would land behind the deck's front edge folds back (a
+    // triangle wave), so an orbit swings to and fro instead of turning through
+    // the set, and the Turn and Fan width sliders stop at the side stands.
+    // In the round (a ring plan, or the house rig over a middle stage) every
+    // direction is the audience, and the house rig's heads spread round it.
+    const round = !!this.inRound || !!(this.rig.plan && this.rig.plan.ring);
+    const frontX = Number.isFinite(this.stageFrontX) ? this.stageFrontX : -20;
+    const fold = (x, m) => { const p = 4 * m, u = (((x + m) % p) + p) % p; return u < 2 * m ? u - m : 3 * m - u; };
     let c = 0;
     for (let a = 0; a < this.laserAnchors.length; a++) {
       const an = this.laserAnchors[a];
       const ring = RING[this.laserRing >= 3 ? a % RING.length : this.laserRing];
       const per = Math.max(1, Math.min(this.LASER_MAX, Math.round(this.laserPer)));
+      // the widest a blade may turn from this head's forward and still land in
+      // front of the stage, on this head's ring (never past the side stands)
+      const fwd = (an.phi || 0) + (this.inRound && !this.rig.plan ? (a / this.laserAnchors.length) * Math.PI * 2 : 0);
+      const half = Math.min(1.62, Math.acos(Math.max(-1, Math.min(1, (frontX + 4) / ring.a))));
       // the centre and width of this head's fan, per pattern. phi 0 = +x, the
       // end-stage habit; a ring rig's heads each face their slice of the room
-      let centre = (an.phi || 0) + pan, width = spreadW, lit = -1;
+      let centre = fwd + pan, width = spreadW, lit = -1;
       switch (pat) {
         case 'fan': width = spreadW * (0.72 + 0.28 * Math.sin(t * 0.3 * spd + a * 0.4)); break;        // fans breathe open and shut
         case 'scan': centre += Math.sin(t * 0.9 * spd + a * 0.35) * (0.5 + spreadW * 0.35); width = 0.06; break;   // one bunched line scanning
@@ -1235,14 +1287,27 @@ export class RigFX {
         case 'still': break;
         case 'wave': break;                                                                              // per blade, below
         case 'sky': centre += Math.sin(t * 0.25 * spd + a * 1.1) * 0.35; break;
+        case 'cross': centre += (an.z < 0 ? 1 : -1) * (0.55 + 0.15 * Math.sin(t * 0.8 * spd)); width = spreadW * 0.5; break;   // each side throws across the other
+        case 'converge': centre = fwd + pan + Math.sin(t * 0.4 * spd) * 0.9; width = 0.1; break;        // every head on one spot: a tunnel
+        case 'zigzag': centre += Math.sin(t * 0.3 * spd + a) * 0.3; break;                              // per blade, below
+        case 'spiral': break;                                                                             // per blade, below
+        case 'rain': centre += Math.sin(t * 0.2 * spd + a * 0.9) * 0.4; break;                          // down onto the floor, flickering
+        case 'burst': width = spreadW * Math.pow((t * 0.7 * spd + a * 0.07) % 1, 0.6); break;          // fans bursting open, again and again
+        case 'flash': break;                                                                              // a still fan blinking on the beat
         default: centre += Math.sin(t * 0.45 * spd + a * 1.7) * 0.5;                                    // sweep
       }
       for (let k = 0; k < per; k++) {
-        let th = centre + (per === 1 ? 0 : (k / (per - 1)) - 0.5) * width;
+        let th = centre + (per === 1 ? 0 : (k / (per - 1)) - 0.5) * width, lift = 0, mul = 1;
         if (pat === 'wave') th += Math.sin(t * 1.6 * spd + k * 0.7 + a * 0.9) * 0.35;
+        else if (pat === 'zigzag') lift = k % 2 ? 7 : -5;
+        else if (pat === 'spiral') { th += Math.sin(t * 1.1 * spd + k * 0.6 + a) * 0.5; lift = Math.sin(t * 1.4 * spd + k * 0.9 + a * 0.5) * 9; }
+        else if (pat === 'rain') { lift = -14 - tilt * 14; mul = rnd01(Math.floor(t * 6 * spd) + k * 3.1 + a * 7.3) > 0.45 ? 1 : 0.04; }
+        else if (pat === 'burst') mul = 1.2 - ((t * 0.7 * spd + a * 0.07) % 1) * 0.8;
+        else if (pat === 'flash') mul = Math.floor(t * 4 * spd) % 2 ? 1.1 : 0.04;
+        if (!round) th = fwd + fold(th - fwd, half);
         // where the blade lands: on the fascia ring, lifted or dropped by tilt;
         // sky mode throws 150 m up so the beams stand over the open bowl
-        let ty = ring.y + (tilt > 0 ? tilt * 70 : tilt * 14), ra = ring.a, rb = ring.b;
+        let ty = ring.y + (tilt > 0 ? tilt * 70 : tilt * 14) + lift, ra = ring.a, rb = ring.b;
         if (sky) { ty = ring.y + 150 + 40 * Math.sin(t * 0.2 * spd + k * 0.8); ra *= 0.9; rb *= 0.9; }
         const tx = Math.cos(th) * ra;
         const tz = Math.sin(th) * rb;
@@ -1272,7 +1337,7 @@ export class RigFX {
         this.laserCol[c * 3 + 2] = cb;
         // a laser is only a beam because of what hangs in the air: a dry room
         // thins it, a hazy one lets it bloom
-        this.laserInt[c] = 0.7 * flick * g * (0.5 + 0.5 * Math.min(1.6, this.roomHaze)) * (lit < 0 ? 1 : (k === lit ? 1.7 : 0.1));
+        this.laserInt[c] = 0.7 * flick * g * mul * (0.5 + 0.5 * Math.min(1.6, this.roomHaze)) * (lit < 0 ? 1 : (k === lit ? 1.7 : 0.1));
         c++;
       }
     }

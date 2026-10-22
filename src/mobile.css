@@ -49,6 +49,7 @@ body.menu :is(#mCam, #mJoy, #mHint, #fabDock, #mHot, .mIcon, #mFxTray) { display
 #mSet { top: calc(var(--mGap) + var(--mTop)); left: calc(var(--mGap) + var(--mLeft)); }
 #mFull { top: calc(var(--mGap) * 2 + var(--mIcon) + var(--mTop)); left: calc(var(--mGap) + var(--mLeft)); }
 #mFocus { top: calc(var(--mGap) * 3 + var(--mIcon) * 2 + var(--mTop)); left: calc(var(--mGap) + var(--mLeft)); }
+#mExport { top: calc(var(--mGap) * 4 + var(--mIcon) * 3 + var(--mTop)); left: calc(var(--mGap) + var(--mLeft)); }
 #mMap { top: calc(var(--mGap) + var(--mTop)); right: calc(var(--mGap) + var(--mRight)); }
 #mBuild { top: calc(var(--mGap) * 2 + var(--mIcon) + var(--mTop)); right: calc(var(--mGap) + var(--mRight)); }
 /* Focus mode's button: a little special — a soft lime breath and a tiny live dot */
@@ -586,3 +587,23 @@ html:not([data-app="crowd"]) :is(#mFxBtn, #mFxTray) { display: none !important; 
 
 /* Build: its deck is the builder (the wrench's panel would say the same) */
 html[data-app="build"] #mBuild { display: none !important; }
+
+/* --- EXPORT: the concept card (every app), and the way back to Creative Stage -------------------- */
+#mExportCard { position: fixed; z-index: 82; display: none; flex-direction: column; left: calc(var(--mGap) * 2 + var(--mIcon) + var(--mLeft)); top: calc(var(--mGap) + var(--mTop));
+  width: min(320px, 80vw); border-radius: 20px; border: 1px solid #000; background: var(--mPanel); box-shadow: inset 0 0 0 1px var(--mLine), 0 18px 44px rgba(0,0,0,0.6);
+  overflow: hidden; color: #fff; font: 15px/1.3 var(--mFont); }
+#mExportCard.open { display: flex; }
+html.mFocus #mExportCard, body.menu #mExportCard { display: none !important; }
+#mExportCard .mxBody { display: flex; flex-direction: column; gap: 10px; padding: 6px 14px 16px; }
+#mExportCard .mxWhat { margin: 0; color: var(--mLime); font-weight: 700; font-size: 13px; letter-spacing: 0.02em; }
+#mExportCard .mxName { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: #b9bbc3; }
+#mExportCard .mxName input { height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--mLine); background: #1b1c20; color: #fff; font: 600 15px/1 var(--mFont); }
+#mExportCard .mxSave { height: 46px; border: 0; border-radius: 12px; background: var(--mLime); color: #141a00; font: 800 15px/1 var(--mFont); }
+#mExportCard .mxSave:active { transform: scale(0.98); }
+#mExportCard .mxNote, #mExportCard .mxDone { margin: 0; font-size: 12px; line-height: 1.4; color: #9fa1aa; }
+#mExportCard .mxDone { color: var(--mLime); font-weight: 700; }
+.mLandHub { display: none; }
+html.mobile .mLandHub { display: block; position: absolute; z-index: 4; top: calc(env(safe-area-inset-top) + 14px); left: calc(env(safe-area-inset-left) + 14px);
+  height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid rgba(216,255,58,0.5); background: rgba(20,21,26,0.72); color: var(--mLime); cursor: pointer;
+  font: 700 16px/1 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; }
+html.mobile .mLandBack.gone { display: none; }

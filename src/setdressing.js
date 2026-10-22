@@ -253,11 +253,15 @@ export function buildFOH(scene) {
   }
 
   function setPosition(x, z) {
-    group.position.set(x, 0, z);             // rotation fixed: always faces -x
+    // rotation fixed: always faces -x. The height is the riser's (setLift), so
+    // moving the desks never drops them off an FOH riser (production.js).
+    group.position.set(x, group.position.y, z);
   }
+  // stand the desks on a riser (production.js); 0 = on the floor
+  function setLift(y) { group.position.y = y; }
 
   scene.add(group);
-  return { group, setPosition };
+  return { group, setPosition, setLift };
 }
 
 // ---------------------------------------------------------------------------

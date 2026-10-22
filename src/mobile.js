@@ -547,6 +547,7 @@ export function initMobile({
     const defP = new Promise((res) => { defOut = res; });
     const ready = Promise.all([import('./presetdeck.js'), import(`./apps/${APP}.js`)]).then(([D, A]) => {
       const def = A.buildApp(eng);
+      appDef = def;
       defOut(def);
       if (def.button) showBtn?.querySelector('.cfLabel')?.replaceChildren(def.button);   // SHOW, MOMENTS, BUILD
       const deck = D.initDeck(def);
@@ -645,6 +646,65 @@ export function initMobile({
     mainMenu();
   }, true);
   const focusBtn = corner('mFocus', 'Focus mode', `${svg('<path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/>')}<i class="mFocusDot"></i>`);
+
+  // --- EXPORT: what you made here, as a concept for Creative Stage (apps/conceptfile.js) ----------
+  // Every app has it, in the same place: the light layers, the moments, the build, the crowd show.
+  // A file to keep or send, and a copy on this device that Creative Stage lists by itself.
+  const exportBtn = corner('mExport', 'Export concept', svg('<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>'));
+  const xCard = document.createElement('div');
+  xCard.id = 'mExportCard';
+  xCard.innerHTML = `<div class="mCardHead"><button class="mCardClose" aria-label="Close"></button><span>Export concept</span></div>
+    <div class="mxBody"><p class="mxWhat"></p>
+      <label class="mxName"><span>Name</span><input type="text" maxlength="60" autocomplete="off" spellcheck="false" enterkeyhint="done"></label>
+      <button class="mxSave">Save concept file</button>
+      <p class="mxNote">A copy stays on this device too: open <b>Creative Stage</b>, then <b>Concepts</b>, to bring it into the show and combine it with the other apps.</p>
+      <p class="mxDone" hidden>Saved. Bring it in from Creative Stage → Concepts.</p></div>`;
+  document.body.appendChild(xCard);
+  const xIn = xCard.querySelector('input'), xWhat = xCard.querySelector('.mxWhat'), xDone = xCard.querySelector('.mxDone');
+  let appDef = null;   // the deck app's definition (Light, Moments, Build), once it has loaded
+  const capture = () => {
+    if (APP === 'crowd') {
+      const d = designer, demo = d?.demoList?.find?.((x) => x.id === d.demo);
+      return { state: { show: d?.snapshot?.() }, summary: demo ? demo.name || demo.id : 'Crowd show' };
+    }
+    return { state: appDef?.concept?.capture?.() ?? null, summary: appDef?.concept?.summary?.() || '' };
+  };
+  const exportOpen = (on) => {
+    if (on) { closeAll(); if (root.classList.contains('mTray')) trayOpen(false); if (bird && bird.mode !== 'off') bird.set('off'); }
+    xCard.classList.toggle('open', on);
+    exportBtn.classList.toggle('on', on);
+    if (!on) { if (document.activeElement === xIn) xIn.blur(); return; }
+    const { summary } = capture();
+    xWhat.textContent = `${APPS[APP]?.name || 'Creative Stage'}${summary ? ` · ${summary}` : ''}`;
+    xIn.value = `${APPS[APP]?.word ? APPS[APP].word[0] + APPS[APP].word.slice(1).toLowerCase() : 'Concept'}${summary ? ` · ${summary}` : ''}`;
+    xDone.hidden = true;
+  };
+  extraCards.push({ isOpen: () => xCard.classList.contains('open'), close: () => exportOpen(false) });
+  onTouch(exportBtn, () => exportOpen(!xCard.classList.contains('open')));
+  xCard.querySelector('.mCardClose').addEventListener('click', (e) => { e.stopPropagation(); exportOpen(false); });
+  xIn.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') xIn.blur(); });
+  xIn.addEventListener('keyup', (e) => e.stopPropagation());
+  xCard.querySelector('.mxSave').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const CF = await import('./apps/conceptfile.js');
+    const { state, summary } = capture();
+    const c = CF.makeConcept(APP, state, { name: xIn.value.trim(), summary, venue: eng.VENUE || null });
+    CF.remember(c);
+    CF.downloadConcept(c);
+    xDone.hidden = false;
+  });
+  xCard.addEventListener('click', (e) => e.stopPropagation());
+
+  // opened from Creative Stage (the hub): the main menu has the way back to it
+  const fromHub = new URLSearchParams(location.search).has('hub');
+  try { if (fromHub) sessionStorage.setItem('cs-from-hub', '1'); } catch (_) { /* private mode */ }
+  let backToHub = fromHub;
+  try { backToHub = backToHub || sessionStorage.getItem('cs-from-hub') === '1'; } catch (_) { /* private mode */ }
+  if (backToHub && land) {
+    land.insertAdjacentHTML('beforeend', '<button class="mLandHub" aria-label="Back to Creative Stage">‹ Creative Stage</button>');
+    land.querySelector('.mLandHub').addEventListener('click', (e) => { e.stopPropagation(); location.href = './'; }, true);
+    land.querySelector('.mLandBack')?.classList.add('gone');
+  }
 
   // --- Focus mode: the UI goes, the camera drifts through cinematic shots, endlessly ---------
   // The first touch shows a thin "exit" line; a second touch (within a few seconds) leaves,

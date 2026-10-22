@@ -506,6 +506,12 @@ export function initArenaFX(scene) {
       state.sheet = !!on;
       sheetGroup.visible = state.sheet;
     },
+    // the sheets hang just in front of THIS room's deck (the emitters above are
+    // authored against the arena's lip at x = -20), always fanning out over the
+    // crowd; a middle stage throws them from its centre
+    setStageFront(frontX, round = false) {
+      sheetGroup.position.x = round || !Number.isFinite(frontX) ? 20 : frontX + 20;
+    },
     setSheetMode(mode) {
       if (!(mode in SHEET_MODES)) return;
       state.sheetMode = mode;

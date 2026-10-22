@@ -20,9 +20,16 @@ export function beams(g, w, h, t, { n = 7, a = '#ff2bd6', b = '#2f7bff', beh = '
   g.globalCompositeOperation = 'lighter';
   for (let i = 0; i < n; i++) {
     const x = w * (0.12 + (0.76 * i) / Math.max(1, n - 1)), y = h * from + 3, k = i / Math.max(1, n - 1) - 0.5;
-    let ang;   // radians from straight down
+    let ang, len = h * 0.95;   // radians from straight down
     switch (beh) {
       case 'park': ang = 0; break;
+      case 'circles': ang = k * 0.4 + Math.cos(t * 2 + i) * 0.22; len = h * (0.8 + 0.15 * Math.sin(t * 2 + i)); break;
+      case 'figure8': ang = Math.sin(t * 0.9 + i * 0.25) * 0.6; len = h * (0.75 + 0.2 * Math.sin(2 * (t * 0.9 + i * 0.25))); break;
+      case 'converge': ang = Math.atan2(w * (0.5 + 0.18 * Math.sin(t * 0.6)) - x, h * 0.55); len = h * 0.62; break;
+      case 'skyward': ang = Math.PI + k * 0.12 + Math.sin(t * 0.5 + i) * 0.05; len = h * 0.3; break;
+      case 'snake': ang = Math.sin(t * 2.2 - i * 0.9) * 0.55; break;
+      case 'stands': ang = Math.PI * 0.62 * Math.sign(k || 1) + Math.sin(t * 0.6 + i) * 0.25; len = h * 0.7; break;
+      case 'flicker': ang = (rnd(Math.floor(t * 2.5 + i * 0.37), i) - 0.5) * 1.3; break;
       case 'fan': ang = k * (0.9 + 0.5 * Math.sin(t * 1.2)); break;
       case 'slowfan': ang = k * (0.6 + 0.3 * Math.sin(t * 0.5)); break;
       case 'ballyhoo': ang = Math.sin(t * 2.6 + i * 1.7) * 0.7; break;
@@ -31,7 +38,7 @@ export function beams(g, w, h, t, { n = 7, a = '#ff2bd6', b = '#2f7bff', beh = '
       case 'up': ang = Math.PI + k * 0.8 * Math.sin(t); break;
       default: ang = Math.sin(t * 1.1 + i * 0.4) * 0.55;   // sweep
     }
-    const col = rainbow ? hsl(t * 80 + i * 40) : i % 2 ? b : a, len = h * 0.95;
+    const col = rainbow ? hsl(t * 80 + i * 40) : i % 2 ? b : a;
     const ex = x + Math.sin(ang) * len, ey = y + Math.cos(ang) * len;
     const gr = g.createLinearGradient(x, y, ex, ey);
     gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(0,0,0,0)');
@@ -72,6 +79,8 @@ export function lasers(g, w, h, t, { pattern = 'sweep', per = 5, a = '#00ff6a', 
     return;
   }
   const spd = speed, n = Math.max(1, Math.min(12, Math.round(per)));
+  // the rig folds a blade back before it would land behind the stage (an orbit swings to and fro)
+  const fold = (x, m) => { const p = 4 * m, u = (((x + m) % p) + p) % p; return u < 2 * m ? u - m : 3 * m - u; };
   LHEADS.forEach((H, hi) => {
     let centre = 0, width = spread, lit = -1;
     switch (pattern) {
@@ -79,18 +88,28 @@ export function lasers(g, w, h, t, { pattern = 'sweep', per = 5, a = '#00ff6a', 
       case 'scan': centre += Math.sin(t * 0.9 * spd + hi * 0.35) * (0.5 + spread * 0.35); width = 0.06; break;
       case 'circle': centre += t * 0.35 * spd * (hi % 2 ? 1 : -1); break;
       case 'chase': lit = Math.floor(t * 3 * spd + hi) % n; break;
-      case 'still': case 'wave': break;
+      case 'still': case 'wave': case 'spiral': case 'flash': break;
       case 'sky': centre += Math.sin(t * 0.25 * spd + hi * 1.1) * 0.35; break;
+      case 'cross': centre += (H.z < 0 ? 1 : -1) * (0.55 + 0.15 * Math.sin(t * 0.8 * spd)); width = spread * 0.5; break;
+      case 'converge': centre = Math.sin(t * 0.4 * spd) * 0.9; width = 0.1; break;
+      case 'zigzag': centre += Math.sin(t * 0.3 * spd + hi) * 0.3; break;
+      case 'rain': centre += Math.sin(t * 0.2 * spd + hi * 0.9) * 0.4; break;
+      case 'burst': width = spread * Math.pow((t * 0.7 * spd + hi * 0.07) % 1, 0.6); break;
       default: centre += Math.sin(t * 0.45 * spd + hi * 1.7) * 0.5;   // sweep
     }
     const ox = w / 2 + (H.z / 12) * w * 0.32, oy = H.y * h;
     for (let k = 0; k < n; k++) {
-      let th = centre + (n === 1 ? 0 : k / (n - 1) - 0.5) * width;
+      let th = centre + (n === 1 ? 0 : k / (n - 1) - 0.5) * width, lift = 0, mul = 1;
       if (pattern === 'wave') th += Math.sin(t * 1.6 * spd + k * 0.7 + hi * 0.9) * 0.35;
-      if (Math.cos(th) < 0) continue;   // aimed back over the stage: not seen from the floor
-      const ex = w / 2 + Math.sin(th) * w * 0.75, ey = pattern === 'sky' ? -h * 0.3 : h * (0.32 - tilt * 0.2);
+      else if (pattern === 'zigzag') lift = k % 2 ? 0.14 : -0.1;
+      else if (pattern === 'spiral') { th += Math.sin(t * 1.1 * spd + k * 0.6 + hi) * 0.5; lift = Math.sin(t * 1.4 * spd + k * 0.9 + hi * 0.5) * 0.18; }
+      else if (pattern === 'rain') { lift = -0.5; mul = rnd(Math.floor(t * 6 * spd) + k * 3.1, hi) > 0.45 ? 1 : 0.05; }
+      else if (pattern === 'burst') mul = 1.2 - ((t * 0.7 * spd + hi * 0.07) % 1) * 0.8;
+      else if (pattern === 'flash') mul = Math.floor(t * 4 * spd) % 2 ? 1.1 : 0.05;
+      th = fold(th, 1.45);
+      const ex = w / 2 + Math.sin(th) * w * 0.75, ey = pattern === 'sky' ? -h * 0.3 : h * (0.32 - tilt * 0.2 - lift);
       const col = mode === 'rainbow' ? hsl(((hi * 0.19 + t * 0.04) % 1) * 360) : mode === 'ab' && (hi + k) % 2 ? b : a;
-      const k01 = lit < 0 ? 1 : k === lit ? 1.4 : 0.12;
+      const k01 = (lit < 0 ? 1 : k === lit ? 1.4 : 0.12) * mul;
       g.strokeStyle = col;
       g.globalAlpha = 0.22 * k01; g.lineWidth = 3.2;
       g.beginPath(); g.moveTo(ox, oy); g.lineTo(ex, ey); g.stroke();
@@ -292,3 +311,108 @@ export function drones(g, w, h, t, { pts = [], col = () => '#00e5ff' } = {}) {
   }
 }
 export { hsl, rnd, TAU };
+
+// --- MOMENTS (apps/moments.js) -----------------------------------------------------------------
+// flames off the stage lip nozzle by nozzle: lit(i, t) says how high each one burns (0: out)
+export function flameRow(g, w, h, t, { n = 8, col = '#ff7a00', lit = () => 1, rainbow = false } = {}) {
+  room(g, w, h, { truss: false });
+  g.globalCompositeOperation = 'lighter';
+  const base = h * 0.84;
+  for (let i = 0; i < n; i++) {
+    const x = w * (0.1 + (0.8 * i) / Math.max(1, n - 1)), k = Math.max(0, Math.min(1, lit(i, t)));
+    g.globalAlpha = 1; g.fillStyle = '#3a3c46'; g.fillRect(x - 3, base - 2, 6, 3);   // the nozzle
+    if (k < 0.03) continue;
+    const c = rainbow ? hsl(t * 90 + i * 45) : typeof col === 'function' ? col(i, t) : col;
+    const fh = h * (0.2 + 0.42 * k) * (0.85 + 0.15 * Math.abs(Math.sin(t * 9 + i * 2)));
+    const gr = g.createLinearGradient(x, base, x, base - fh);
+    gr.addColorStop(0, '#fff'); gr.addColorStop(0.22, c); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.globalAlpha = Math.min(1, k * 1.5); g.fillStyle = gr;
+    g.beginPath(); g.moveTo(x - 6, base); g.quadraticCurveTo(x + Math.sin(t * 9 + i) * 5, base - fh * 0.6, x, base - fh); g.quadraticCurveTo(x + 4, base - fh * 0.5, x + 6, base); g.fill();
+  }
+  g.globalAlpha = 1;
+}
+
+// outdoor fireworks over a stadium's rim: shells [{ x 0..1, at (s), col, style, big }] in a loop of
+// `period` seconds; styles: peony, willow (gold that hangs), ring, heart, salute (a white crack)
+export function sky(g, w, h, t, { shells = [], period = 6 } = {}) {
+  g.globalCompositeOperation = 'source-over';
+  const bg = g.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, '#02030c'); bg.addColorStop(1, '#0c0e1e');
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#16171f';   // the stands, round the bowl
+  g.beginPath(); g.moveTo(0, h); g.lineTo(0, h * 0.8); g.quadraticCurveTo(w / 2, h * 0.68, w, h * 0.8); g.lineTo(w, h); g.fill();
+  g.globalCompositeOperation = 'lighter';
+  const u = t % period;
+  shells.forEach((S, s) => {
+    const age = u - (S.at || 0), x = w * S.x, y0 = h * 0.76, by = h * (0.16 + 0.16 * rnd(s, 3)), rise = 0.7;
+    if (age < 0) return;
+    if (age < rise) { g.globalAlpha = 1; g.fillStyle = '#ffe2a8'; g.fillRect(x - 1, y0 - (age / rise) * (y0 - by), 2, 4); return; }
+    const st = S.style || 'peony', slow = st === 'willow', k = (age - rise) / (slow ? 2.6 : 1.5);
+    if (k > 1) return;
+    if (st === 'salute') {
+      if (k > 0.25) return;
+      const r = w * 0.08, gr = g.createRadialGradient(x, by, 0, x, by, r);
+      gr.addColorStop(0, `rgba(255,255,255,${1 - k * 4})`); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.globalAlpha = 1; g.fillStyle = gr; g.fillRect(x - r, by - r, r * 2, r * 2);
+      return;
+    }
+    const R = w * 0.12 * (S.big || 1) * Math.sqrt(k), rays = 22;
+    g.globalAlpha = 1 - k;
+    for (let i = 0; i < rays; i++) {
+      const a = (i / rays) * TAU;
+      let dx = Math.cos(a), dy = Math.sin(a);
+      if (st === 'heart') { dx = Math.sin(a) ** 3; dy = -(13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a)) / 16; }
+      else if (st === 'ring') dy *= 0.35;
+      const px = x + dx * R, py = by + dy * R + k * k * h * (slow ? 0.32 : 0.06);
+      g.fillStyle = S.col === 'rainbow' ? hsl(i * 16 + t * 40) : S.col || '#ffc84a';
+      if (slow) g.fillRect(px - 0.6, py - 8 * k, 1.2, 8 * k);   // the trails hang
+      g.beginPath(); g.arc(px, py, 1.5, 0, TAU); g.fill();
+    }
+  });
+  g.globalAlpha = 1;
+}
+
+// confetti popped up from points (the floor cannons in the crowd, the stage's poppers, the big
+// cannons): src [{ x, y (0..1), d (delay, s), up (how high) }], in a loop of `period`
+export function pops(g, w, h, t, { src = [{ x: 0.5, y: 0.84 }], n = 70, period = 3.4, bg = true, cols = ['#ff1430', '#ffe600', '#1e5aff', '#00ff6a', '#ff2bd6', '#ffffff'] } = {}) {
+  if (bg) room(g, w, h, { truss: false });
+  g.globalCompositeOperation = 'source-over';
+  for (let i = 0; i < n; i++) {
+    const S = src[i % src.length], tau = (((t - (S.d || 0)) % period) + period) % period;
+    if (tau > period * 0.94) continue;
+    const e = 1 - Math.exp(-3.2 * tau), vx = (rnd(i, 1) - 0.5) * w * 0.3, vy = h * (S.up ?? 0.6) * (0.6 + 0.6 * rnd(i, 2));
+    const x = w * S.x + vx * e + Math.sin(t * 3 + i) * 3 * e, y = h * S.y - vy * e + tau * tau * h * 0.05;
+    if (y > h * 0.92) continue;
+    g.save(); g.translate(x, y); g.rotate(t * 4 + i); g.scale(1, Math.abs(Math.sin(t * 6 + i)) + 0.2);
+    g.fillStyle = cols[i % cols.length]; g.fillRect(-2.5, -1.5, 5, 3); g.restore();
+  }
+}
+
+// a balloon drop from the nets in the roof, released in waves (seconds), bobbing on the crowd's hands
+export function drop(g, w, h, t, { cols = ['#ff1430', '#ffe600', '#1e5aff', '#00ff6a', '#ff2bd6'], n = 30, waves = [0], period = 8 } = {}) {
+  room(g, w, h);
+  const u = t % period, land = h * 0.74, fade = Math.max(0, Math.min(1, (period - u) / 0.8));
+  g.strokeStyle = '#3a3c46'; g.lineWidth = 1; g.beginPath(); g.moveTo(w * 0.06, h * 0.15); g.lineTo(w * 0.94, h * 0.15); g.stroke();   // the net
+  for (let i = 0; i < n; i++) {
+    const age = u - waves[i % waves.length] - rnd(i, 4) * 0.6, x = w * (0.06 + 0.88 * rnd(i, 1)) + (age > 0 ? Math.sin(t * 1.3 + i) * 4 : 0);
+    let y = h * 0.11 + Math.max(0, age) * h * 0.3;
+    if (y > land) y = land - Math.abs(Math.sin(age * 3 + i)) * h * 0.1 * Math.exp(-(y - land) / h);
+    g.globalAlpha = age > 0 ? fade : 1;
+    g.fillStyle = cols[i % cols.length];
+    g.beginPath(); g.ellipse(x, y, 5, 6, 0, 0, TAU); g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.55)'; g.beginPath(); g.arc(x - 1.8, y - 2.4, 1.3, 0, TAU); g.fill();
+  }
+  g.globalAlpha = 1;
+}
+
+// glowing balls bobbing over the crowd (the lanterns), lit from inside
+export function lanterns(g, w, h, t, { cols = ['#ffd27a', '#7ae8ff', '#ff8ad8', '#b9ff7a'], n = 10 } = {}) {
+  room(g, w, h, { truss: false });
+  g.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < n; i++) {
+    const x = w * (0.08 + 0.84 * rnd(i, 1)) + Math.sin(t * 0.4 + i) * 10, y = h * (0.5 + 0.14 * rnd(i, 2)) - Math.abs(Math.sin(t * 1.4 + i * 1.7)) * h * 0.18, r = 7 + rnd(i, 3) * 3;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r * 2.2);
+    gr.addColorStop(0, '#fff'); gr.addColorStop(0.3, cols[i % cols.length]); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(x - r * 2.2, y - r * 2.2, r * 4.4, r * 4.4);
+  }
+}

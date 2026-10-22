@@ -11,7 +11,8 @@ const EX = DZ, EZ = -DX;                               // the screen's right, on
 const toward = (nx, nz) => nx * DX + nz * DZ;           // > 0: a face we can see
 const depth = (x, z) => x * DX + z * DZ;                // bigger: nearer, drawn later
 
-export function drawIso(g, w, h, { cfg = {}, plan = null, mark = null, t = 0 } = {}) {
+// open: an open-air venue (the plan is drawn in arena metres all the same): the pitch, no jumbotron
+export function drawIso(g, w, h, { cfg = {}, plan = null, mark = null, t = 0, open = false } = {}) {
   // fit the part of the room that matters (the stage end, or the whole floor for a round) to the tile
   const middle = cfg.position === 'middle';
   const [x0, x1, z0, z1] = middle ? [-26, 26, -18, 18] : [-34, 14, -19, 19];
@@ -59,12 +60,17 @@ export function drawIso(g, w, h, { cfg = {}, plan = null, mark = null, t = 0 } =
   };
 
   // the floor: the bowl's first row round it
-  const bowl = []; for (let i = 0; i < 48; i++) { const a = (i / 48) * TAU, cx = Math.cos(a), cz = Math.sin(a); bowl.push([Math.sign(cx) * Math.min(31.4, Math.abs(cx) * 40), 0, Math.sign(cz) * Math.min(13.9, Math.abs(cz) * 20)]); }
-  poly(bowl, '#0d0e13', '#3a1820', 2.5);
-  for (let x = -24; x <= 28; x += 4) line([x, 0, -13], [x, 0, 13], 'rgba(200,16,46,0.12)', 1);   // a hint of the floor seats
+  if (open) {   // the pitch under its dark cover, its touchlines faintly, out past the tile's edge
+    poly([[-36, 0, -21], [40, 0, -21], [40, 0, 21], [-36, 0, 21]], '#0c100e', '#1f3a26', 2.5);
+    for (let x = -30; x <= 40; x += 5) line([x, 0, -20], [x, 0, 20], 'rgba(60,140,80,0.10)', 1);
+  } else {
+    const bowl = []; for (let i = 0; i < 48; i++) { const a = (i / 48) * TAU, cx = Math.cos(a), cz = Math.sin(a); bowl.push([Math.sign(cx) * Math.min(31.4, Math.abs(cx) * 40), 0, Math.sign(cz) * Math.min(13.9, Math.abs(cz) * 20)]); }
+    poly(bowl, '#0d0e13', '#3a1820', 2.5);
+    for (let x = -24; x <= 28; x += 4) line([x, 0, -13], [x, 0, 13], 'rgba(200,16,46,0.12)', 1);   // a hint of the floor seats
+  }
 
   // the stage the builder makes
-  const front = cfg.farSize === 'large' ? -13.6 : cfg.curtains === 'medium' || cfg.curtains === 'small' || cfg.curtains === 'theatre' || cfg.curtains === 'hemicycle' ? -26 : -20;
+  const front = cfg.farSize === 'huge' ? -8 : cfg.farSize === 'large' ? -13.6 : cfg.curtains === 'medium' || cfg.curtains === 'small' || cfg.curtains === 'theatre' || cfg.curtains === 'hemicycle' ? -26 : -20;
   const items = [];   // [depth, draw]
   if (middle) items.push([0, () => (cfg.middleShape === 'square' ? box(0, 0, 15, 15, 0, 1.6) : disc(0, 0, 8.4, 0, 1.6))]);
   else {
@@ -121,7 +127,7 @@ export function drawIso(g, w, h, { cfg = {}, plan = null, mark = null, t = 0 } =
   });
   g.restore();
   for (const f of plan?.fixtures || []) { const [u, v] = P(f.x, f.y - 0.4, f.z); g.fillStyle = FIX[f.type] || '#fff'; g.fillRect(u - 1.3, v - 1.3, 2.6, 2.6); }
-  // the jumbotron, for scale (the centre-hung board)
-  box(0, 0, 14.4, 9.2, 13.3, 24, 0, 'rgba(60,64,80,0.25)', 'rgba(40,44,60,0.18)', 'rgba(120,130,160,0.35)');
+  // the jumbotron, for scale (the arena's centre-hung board; the open air has none)
+  if (!open) box(0, 0, 14.4, 9.2, 13.3, 24, 0, 'rgba(60,64,80,0.25)', 'rgba(40,44,60,0.18)', 'rgba(120,130,160,0.35)');
   return P;   // the projection, to mark a point on it (a seat, a camera)
 }

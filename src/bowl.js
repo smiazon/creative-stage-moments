@@ -115,6 +115,14 @@ export function spanAtBaseU(n, u) {
 export function sectionLabel(n, j, base = 101) { return base + ((n - j) % n); }
 export function sectionSpan(n, label, base = 101) { return (((n - (label - base)) % n) + n) % n; }
 
+// The end stage the behind-stage tarps are measured against. stage.js reports
+// its deck front every time it builds one (null for a stage in the middle), so
+// a venue with `tarpsByStage` can pick the sections that really sit behind and
+// beside the deck, for whatever size it is. setCovers / coverMask read it at
+// call time; main.js always rebuilds the stage before it re-tarps.
+let tarpStage = null;
+export function setTarpStage(s) { tarpStage = s; }
+
 // Base-path fraction of the rim point a seat at (x, z) sits behind: the point
 // of the inner rounded rectangle it is pushed straight out from. Same start
 // and direction as roundedRectPath: from (sx, b) along the +z side towards -x,
@@ -302,12 +310,18 @@ function pathStrip(base, u0, u1, off1, y1, off2, y2) {
 // down behind the goals, so the rows a tarp lies over change round the bowl.
 function pathStripTo(base, u0, u1, off1, y1, backAt) {
   const n = base.length;
-  const i0 = Math.round(u0 * n);
-  const count = Math.max(2, Math.round((u1 - u0) * n));
+  // Exactly from u0 to u1 (an aisle line each), with every path sample in
+  // between. Rounding the ends to the nearest sample left each tarp up to half
+  // a sample short or long of its aisle — metres out on an upper deck's
+  // corner, where the samples fan apart — and differently on the two sides.
+  const pts = [pathAt(base, n, u0)];
+  for (let i = Math.floor(u0 * n) + 1; i < u1 * n - 1e-6; i++) pts.push(base[((i % n) + n) % n]);
+  pts.push(pathAt(base, n, u1));
+  const count = pts.length - 1;
   const pos = [], uv = [], idx = [];
   let k = 0, joined = false;   // pairs written; whether the last point was part of the strip
   for (let s = 0; s <= count; s++) {
-    const p = base[(i0 + s) % n];
+    const p = pts[s];
     const back = backAt(p);
     if (!back) { joined = false; continue; }
     pos.push(p.x + p.nx * off1, y1, p.z + p.nz * off1);
@@ -1299,9 +1313,39 @@ export function buildBowl(scene) {
   // symmetrically outward: 3 / 5 / 7 of 24, and the same share of a ring cut
   // into more sections (7 / 11 / 15 of 48).
   const BEHIND_SHARE = { small: 3 / 24, medium: 5 / 24, full: 7 / 24 };
+  // Open-air bowls (`tarpsByStage`: the stadium, the cricket ground) pick the
+  // sections by where they stand against the deck, so the tarps follow the
+  // stage's size and come out mirror-symmetric (the section grid is phased
+  // from the centre there, venue.js). A section is judged by the middle of
+  // its front edge:
+  //   small  — the stand straight behind the stage structure: behind the deck
+  //            front and within the stage's width (wings included)
+  //   medium — every section behind the deck front, corners and the side
+  //            stands alongside the deck. The same 1.5 m test main.js's
+  //            frontSections uses, so the show picture and the tarps agree
+  //            on which sections are out front.
+  //   full   — medium and one more section's run along each side stand
+  const BY_STAGE = !!SPEC.bowl.tarpsByStage;
+  const spanMid = BY_STAGE ? Array.from({ length: AISLES }, (_, j) => {
+    const [a, b] = spanBaseU(AISLES, j);
+    return basePointAt((a + b) / 2);
+  }) : null;
   const behindSpans = (behind) => {
     const share = BEHIND_SHARE[behind];
     if (!share) return [];
+    if (BY_STAGE) {
+      const front = tarpStage && Number.isFinite(tarpStage.front) ? tarpStage.front : SPEC.downstageX;
+      const hw = SPEC.stageDress?.hw ?? B;
+      const reach = SPEC.bowl.tarpFullReach ?? 14;
+      const out = [];
+      spanMid.forEach((p, j) => {
+        const take = behind === 'small' ? p.x < front && Math.abs(p.z) <= hw + 0.5
+          : behind === 'medium' ? p.x < front + 1.5
+            : p.x < front + 1.5 + reach;
+        if (take) out.push(j);
+      });
+      return out;
+    }
     const mid = 101 + Math.round((AISLES * 3) / 4), half = Math.max(1, Math.round((share * AISLES - 1) / 2));
     const out = [];
     for (let l = mid - half; l <= mid + half; l++) out.push(sectionSpan(AISLES, l));
@@ -1328,12 +1372,12 @@ export function buildBowl(scene) {
   }
   // which seats sit under the given tarps — null when nothing is covered
   function coverMask({ behind = 'none', rings = [], cstage = null } = {}) {
-    const spans = behindSpans(behind);
+    const spans = new Set(behindSpans(behind));   // the very spans setCovers draws
     const ringed = tiers.map((t) => rings.includes(t.name));
-    if (!spans.length && !ringed.some(Boolean) && !cstage) return null;
+    if (!spans.size && !ringed.some(Boolean) && !cstage) return null;
     const mask = new Uint8Array(seatSpots.length);
     for (let i = 0; i < seatSpots.length; i++) {
-      if (ringed[seatTier[i]] || spans.includes(seatSpan[i])) { mask[i] = 1; continue; }
+      if (ringed[seatTier[i]] || spans.has(seatSpan[i])) { mask[i] = 1; continue; }
       if (cstage) {
         // The C-stage deck is a 5-seat x 2-row rectangle turned to the rows,
         // not the axis-aligned square the old riser tarp masked. `inside` is

@@ -10,6 +10,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import { boxTruss } from './truss.js';
 import { BOWL_A, BOWL_B, topEdgeAt } from './bowl.js';
 import { PITCH, SPEC } from './venue.js';
+import { MAIN_H, stageDressLayout, onStageBuilt, currentStageCfg } from './stage.js';
 import { drawLogo, onLogo, LOGO_ASPECT } from './logo.js';
 
 function makeCanvas(w, h) {
@@ -616,38 +617,171 @@ export function buildEndBoards(scene, screenMat) {
 }
 
 // ---------------------------------------------------------------------------
-// Ground-support roof over the end stage: four towers and a flat truss grid
-// at the rig's hoist height, with a skin on top. Stadium shows bring their
-// own steel; the house roof is open over the pitch.
+// Ground-support roof over the end stage — the steel a stadium show brings in,
+// since the house roof is open over the pitch. Heavy towers stand on the deck
+// (a pair upstage, a pair at the lip, more between on a deep deck), a 2 m
+// girder on each side and a grid of lighter trusses at the rig's hoist height
+// (SPEC.roofY), cantilevered 7 m past the lip to the roof line apps/concepts.js
+// designs against, and held up there by king-post masts on the front towers
+// with stays to the front header. The header carries a black valance, the
+// sides a short drop, and a black scrim closes the upstage end so the stand
+// behind the stage is masked. Open on top: no flat skin, nothing reads as a
+// black floor floating over the stage from the upper tiers.
+//
+// It is laid out from the deck actually built (stage.js stageDressLayout), and
+// refits every time the stage is rebuilt, so a 'large' or 'huge' deck gets a
+// roof that sits at its own front.
 // ---------------------------------------------------------------------------
+let scrimTex = null;
+// black scrim: a fine woven mesh, matte. One small canvas, tiled.
+export function makeScrimTexture() {
+  if (scrimTex) return scrimTex;
+  const [c, ctx] = makeCanvas(128, 128);
+  const rand = mulberry32(77);
+  ctx.fillStyle = '#16171b'; ctx.fillRect(0, 0, 128, 128);
+  for (let y = 0; y < 128; y += 2) {
+    ctx.fillStyle = `rgba(0,0,0,${0.35 + rand() * 0.2})`;
+    ctx.fillRect(0, y, 128, 1);
+  }
+  for (let x = 0; x < 128; x += 2) {
+    ctx.fillStyle = `rgba(0,0,0,${0.25 + rand() * 0.2})`;
+    ctx.fillRect(x, 0, 1, 128);
+  }
+  for (let i = 0; i < 400; i++) {
+    const g = 30 + rand() * 30;
+    ctx.fillStyle = `rgba(${g},${g},${g + 4},${0.05 + rand() * 0.08})`;
+    ctx.fillRect(rand() * 128, rand() * 128, 1 + rand() * 6, 1);
+  }
+  scrimTex = new THREE.CanvasTexture(c);
+  scrimTex.colorSpace = THREE.SRGBColorSpace;
+  scrimTex.wrapS = scrimTex.wrapT = THREE.RepeatWrapping;
+  return scrimTex;
+}
+// a vertical scrim panel, w x h, centred at (x, y, z), its face turned by rotY
+export function scrimPanel(mat, w, h, x, y, z, rotY) {
+  const g = new THREE.PlaneGeometry(w, h);
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * w / 2.5, uv.getY(i) * h / 2.5);
+  const m = new THREE.Mesh(g, mat);
+  m.position.set(x, y, z);
+  m.rotation.y = rotY;
+  return m;
+}
+
 export function buildStageRoof(scene) {
   const g = new THREE.Group();
-  const back = SPEC.stageBack + 0.8, front = SPEC.downstageX + 7.0, hz = 22.0, y = SPEC.roofY;
-  const mat = new THREE.MeshLambertMaterial({ color: 0x2e3136, emissive: 0x0c0d10 });
-  const geos = [];
-  for (const x of [back, front]) for (const z of [-hz, hz]) {
-    const t = boxTruss(y + 1.4, 1.3, 2.0);
+  g.name = 'stageRoof';
+  const steelMat = new THREE.MeshLambertMaterial({ color: 0x2e3136, emissive: 0x0c0d10 });
+  const scrimMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: makeScrimTexture(), side: THREE.DoubleSide });
+  const trimMat = new THREE.MeshLambertMaterial({ color: 0x5a5f68 });
+  const beaconMat = new THREE.MeshBasicMaterial({ toneMapped: false });
+  beaconMat.color.setRGB(2.4, 0.15, 0.1);   // aviation red, over the bloom gate
+  let key = '';
+
+  const vTruss = (geos, x, z, y0, y1, section, bay, tube) => {
+    const t = boxTruss(y1 - y0, section, bay, tube);
     t.rotateZ(Math.PI / 2);                    // +x → up
-    t.translate(x, (y + 1.4) / 2, z);
+    t.translate(x, (y0 + y1) / 2, z);
     geos.push(t);
-  }
-  const span = front - back;
-  for (let x = back; x <= front + 0.01; x += span / 4) {
-    const t = boxTruss(hz * 2, 1.4, 2.0);
+  };
+  const xTruss = (geos, x0, x1, y, z, section, bay, tube) => {
+    const t = boxTruss(x1 - x0, section, bay, tube);
+    t.translate((x0 + x1) / 2, y, z);
+    geos.push(t);
+  };
+  const zTruss = (geos, x, y, z0, z1, section, bay, tube) => {
+    const t = boxTruss(z1 - z0, section, bay, tube);
     t.rotateY(Math.PI / 2);
-    t.translate(x, y + 0.7, 0);
+    t.translate(x, y, (z0 + z1) / 2);
     geos.push(t);
+  };
+  const cable = (geos, ax, ay, az, bx, by, bz, r) => {
+    const dir = new THREE.Vector3(bx - ax, by - ay, bz - az), len = dir.length();
+    const c = new THREE.CylinderGeometry(r, r, len, 6);
+    c.translate(0, len / 2, 0);
+    c.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize()));
+    c.translate(ax, ay, az);
+    geos.push(c);
+  };
+
+  function build(L) {
+    const { towerX, roofHW: hz, roofY: y, roofFront: xf, scrimX } = L;
+    const xb = towerX[0], xl = towerX[towerX.length - 1];
+    const steel = [], trims = [], beacons = [];
+    const GY = y + 1.0;                        // girder centre line: bottom chord at the hoist height
+    // towers: 1.3 m heavy lattice from the deck to above the grid, a sleeve
+    // block where the grid bears, a base plate on the deck
+    for (const x of towerX) {
+      for (const z of [-hz, hz]) {
+        vTruss(steel, x, z, MAIN_H, y + 2.4, 1.3, 2.0, 1.6);
+        const sleeve = new THREE.BoxGeometry(2.1, 1.3, 2.1); sleeve.translate(x, GY, z); steel.push(sleeve);
+        const plate = new THREE.BoxGeometry(2.2, 0.16, 2.2); plate.translate(x, MAIN_H + 0.08, z); steel.push(plate);
+      }
+    }
+    // main girders down each side, back tower to the header, 2 m deep
+    for (const z of [-hz, hz]) xTruss(steel, xb - 1.2, xf + 0.4, GY, z, 2.0, 2.0, 1.4);
+    // the grid in between: four lighter runs front to back
+    for (const k of [-2, -1, 1, 2]) xTruss(steel, xb - 0.6, xf, GY, (hz * k) / 3, 1.0, 1.5, 1.1);
+    xTruss(steel, xb - 0.6, xf, GY, 0, 1.2, 1.5, 1.2);   // the centre spine
+    // cross trusses: heavy over every tower line, the front header heaviest,
+    // light ones at about 5 m between
+    for (const x of towerX) zTruss(steel, x, GY, -hz, hz, 1.6, 2.0, 1.3);
+    zTruss(steel, xf, GY, -hz - 1.2, hz + 1.2, 2.2, 2.0, 1.5);
+    const xs = [...towerX, xf].sort((a, b) => a - b);
+    for (let i = 0; i < xs.length - 1; i++) {
+      const n = Math.max(1, Math.round((xs[i + 1] - xs[i]) / 5));
+      for (let j = 1; j < n; j++) zTruss(steel, xs[i] + ((xs[i + 1] - xs[i]) * j) / n, GY, -hz, hz, 1.0, 1.5, 1.1);
+    }
+    // king-post masts on the front towers, stayed to the header ends and back
+    // along the girders: what holds a 7 m cantilever up
+    const mastTop = y + 9.5;
+    for (const z of [-hz, hz]) {
+      vTruss(steel, xl, z, y + 2.4, mastTop, 0.9, 1.2, 1.2);
+      const cap = new THREE.BoxGeometry(1.3, 0.45, 1.3); cap.translate(xl, mastTop + 0.22, z); steel.push(cap);
+      cable(steel, xl, mastTop, z, xf, y + 2.0, z, 0.05);
+      cable(steel, xl, mastTop - 0.6, z, xf, y + 2.0, z * 0.55, 0.035);
+      cable(steel, xl, mastTop, z, xb, y + 2.0, z, 0.05);
+      const b = new THREE.SphereGeometry(0.22, 10, 8); b.translate(xl, mastTop + 0.7, z); beacons.push(b);
+    }
+    // tie-backs from the back towers down to the deck: the roof's bracing
+    for (const z of [-hz, hz]) {
+      cable(steel, xb, y - 1.0, z, xb + 6.0, MAIN_H + 0.2, z, 0.04);
+    }
+    const roof = new THREE.Group();
+    roof.add(new THREE.Mesh(BufferGeometryUtils.mergeGeometries(steel), steelMat));
+    roof.add(new THREE.Mesh(BufferGeometryUtils.mergeGeometries(beacons), beaconMat));
+    // the valance on the front header: black, a steel trim along its foot.
+    // Its foot is level with the grid's underside, so whatever hangs under the
+    // front of the roof (the festival's IR heads, a concept's trusses) shows.
+    const vw = 2 * hz + 3.4, vh = 4.75, vx = xf + 1.25, vy = y - 0.25 + vh / 2;
+    roof.add(scrimPanel(scrimMat, vw, vh, vx, vy, 0, Math.PI / 2));
+    const foot = new THREE.BoxGeometry(0.12, 0.14, vw); foot.translate(vx + 0.02, vy - vh / 2, 0); trims.push(foot);
+    // short drops down the sides of the roof, so the grid reads as a box
+    for (const sd of [-1, 1]) {
+      const len = vx - (xb - 1.2);
+      roof.add(scrimPanel(scrimMat, len, 3.8, (vx + xb - 1.2) / 2, GY + 0.2, sd * (hz + 1.3), 0));
+    }
+    // the upstage scrim, deck to grid, wider than the roof: masks the end stand
+    roof.add(scrimPanel(scrimMat, 2 * hz + 2.8, y + 3.2 - MAIN_H, scrimX, (y + 3.2 + MAIN_H) / 2, 0, Math.PI / 2));
+    roof.add(new THREE.Mesh(BufferGeometryUtils.mergeGeometries(trims), trimMat));
+    return roof;
   }
-  for (const z of [-hz, 0, hz]) {
-    const t = boxTruss(span, 1.4, 2.0);
-    t.translate((back + front) / 2, y + 0.7, z);
-    geos.push(t);
+
+  function fit(cfg) {
+    const L = stageDressLayout(cfg);
+    if (!L) return;                            // a middle stage: main.js hides the roof
+    const k = `${L.F.toFixed(2)}|${L.roofHW}|${L.towerX.length}`;
+    if (k === key) return;
+    key = k;
+    for (const c of [...g.children]) {
+      g.remove(c);
+      c.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    }
+    g.add(build(L));
   }
-  g.add(new THREE.Mesh(BufferGeometryUtils.mergeGeometries(geos), mat));
-  const skin = new THREE.Mesh(new THREE.BoxGeometry(span + 2.4, 0.3, hz * 2 + 2.4),
-    new THREE.MeshLambertMaterial({ color: 0x1c1e23 }));
-  skin.position.set((back + front) / 2, y + 1.55, 0);
-  g.add(skin);
+  fit(currentStageCfg());
+  onStageBuilt((cfg) => fit(cfg));
+  g.userData.fit = fit;
   g.visible = false;
   scene.add(g);
   return g;

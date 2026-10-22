@@ -590,8 +590,9 @@ export function initFireworks(scene, { renderer, sites = null, siteCount = 28 } 
       (PRESETS[key] || PRESETS.mixed)();
     },
     fireFinale() { if (state.sound) audio.ensure(); PRESETS.finale(); },
-    /** one shell from one rack: for the timeline and the console's fine control */
-    fireShell(site, type, cal, colour) { launch(site, type, cal, colour); },
+    /** one shell from one rack: for the timeline and the console's fine control; optionally a
+     *  second colour (the change shells' second, the others' half) and a delay in seconds */
+    fireShell(site, type, cal, colour, colour2 = null, delay = 0) { launch(site, type, cal, colour, colour2, Math.max(0, +delay || 0)); },
     setPreset(key) { if (PRESETS[key]) { state.preset = key; api.fire(key); } },
     /** looping volleys every few seconds until switched off */
     setShow(on) { state.show = !!on; if (on) { api.fire(); showNext = T.now + rnd(5, 7); } },

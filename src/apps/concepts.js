@@ -9,6 +9,14 @@
 // Conventions (rig.js): a straight truss runs along z at rot PI/2, along x at rot 0; a deck is w
 // along x, d along z, turned by rot; a screen faces the way its "face" angle points (0: toward the
 // crowd at the back, +x), stored as rot = face - PI/2; a PA hang faces yaw = -face.
+//
+// EACH VENUE HAS ITS OWN LIST (conceptsFor): the arena's (the shared designs and its own, made for
+// a room with a roof to fly from) and the stadium's (the shared designs, sized up, and its own big
+// open-air ones). Every concept is drawn in arena metres; makePlan fits it to the venue it hangs
+// in: the stadium's deck, runway and centre stage are bigger, so an end-stage design scales out
+// from the deck's front edge and a round one from the middle. Out in the open air there is no roof
+// over the pitch to fly from, so any truss that is not over the stage stands on towers (legs).
+import { SPEC, VENUE } from '../venue.js';
 const PI = Math.PI, TAU = PI * 2;
 const r2 = (v) => Math.round(v * 100) / 100;
 export const FRONT = -20;   // the end stage's front edge
@@ -60,6 +68,11 @@ export const RIG_STYLES = [
   ['washes', 'Wash rig', { level: 1, mix: ['wash', 'wash', 'beam'] }],
   ['lasers', 'Laser rig', { level: 1, mix: ['beam', 'laser', 'spot'] }],
   ['strobes', 'Strobe rig', { level: 1, mix: ['beam', 'strobe', 'wash'] }],
+  ['dense', 'Dense beams', { level: 2, mix: ['beam', 'beam', 'strobe'], every: 1.2 }],
+  ['spots', 'Spot rig', { level: 1, mix: ['spot', 'spot', 'wash'] }],
+  ['party', 'Party rig', { level: 1, mix: ['beam', 'laser', 'strobe', 'wash'] }],
+  ['laserheavy', 'Laser heavy', { level: 2, mix: ['laser', 'beam', 'laser', 'spot'] }],
+  ['theatre', 'Theatre rig', { level: 0, mix: ['spot', 'wash', 'wash'], every: 2.4 }],
 ];
 
 // --- the concepts -----------------------------------------------------------------------------------------
@@ -72,7 +85,7 @@ const fxEnd = () => [...[-11, 11].map((z) => ({ type: 'confetti', x: F - 1, z })
 const rowsEnd = (lv) => [across(F - 2, 26, 15.4), ...(lv >= 1 ? [across(F - 8, 24, 15.6)] : []), ...(lv >= 2 ? [across(F - 13, 22, 16), across(F + 1.5, 20, 14.2)] : [])];
 
 export const CONCEPTS = [
-  ['classic', 'Classic arena', 'end', (lv) => ({
+  ['classic', 'Classic end stage', 'end', (lv) => ({
     cfg: { ...END, catwalk: 'standard', bstage: 'circle' },
     trusses: [...rowsEnd(lv), ...(lv >= 1 ? [across(F - 14, 22, 15.4)] : [])],
     speakers: mainsEnd(), barricades: [bar(F + 2.5, 0, 28)], fx: fxEnd(),
@@ -196,7 +209,143 @@ export const CONCEPTS = [
     speakers: [0, 1, 2, 3].map((i) => { const a = (i / 4) * TAU; return hang(Math.cos(a) * 13, Math.sin(a) * 11, 11.5, a); }),
     barricades: [bar(0, 0, 6, 0, 'ring', 9.8)], fx: Array.from({ length: 8 }, (_, i) => { const a = (i / 8) * TAU; return { type: 'flame', x: r2(Math.cos(a) * 15), z: r2(Math.sin(a) * 12) }; }),
   })],
+
+  // --- the arena's own: a room with a roof to fly from, the crowd close -------------------------------
+  ['thrust', 'Thrust stage', 'end', (lv) => ({
+    cfg: { ...END },
+    // the deck pushed out into the floor: the band with the crowd on three sides
+    stages: [deck(F + 5, 0, 10, 13, 1.8), deck(F + 10.8, 0, 1.6, 6, 1.1)],
+    trusses: [...rowsEnd(lv), square(F + 5, 0, 5.2, 12), ...(lv >= 1 ? [runX(F + 5, -8.6, 10, 12.6), runX(F + 5, 8.6, 10, 12.6)] : [])],
+    screens: [panel(F - 1.5, -16, 4, 7, 4.5, 0.2), panel(F - 1.5, 16, 4, 7, 4.5, -0.2)],
+    speakers: mainsEnd(), barricades: [bar(F + 11.8, 0, 15), bar(F + 5, -7.6, 10, 0), bar(F + 5, 7.6, 10, 0)],
+    fx: [...fxEnd(), { type: 'flame', x: F + 9.5, z: -5.5 }, { type: 'flame', x: F + 9.5, z: 5.5 }], aimFront: true,
+  }), 'arena'],
+  ['ystage', 'Y runway', 'end', (lv) => ({
+    cfg: { ...END },
+    // two runways off the front corners that meet and run on as one, to a diamond
+    stages: [deckBetween(F, -8, F + 9, -1.4, 2.4, 1.5), deckBetween(F, 8, F + 9, 1.4, 2.4, 1.5), deck(F + 15.5, 0, 13, 2.6, 1.5), deck(F + 24, 0, 6, 6, 1.5, PI / 4)],
+    trusses: [...rowsEnd(lv), diag(F + 1, -8, F + 9, -1.4, 11.4), diag(F + 1, 8, F + 9, 1.4, 11.4), runX(F + 15.5, 0, 12, 11.4), square(F + 24, 0, 4.2, 11)],
+    speakers: mainsEnd(), barricades: [bar(F + 2.5, -12, 6), bar(F + 2.5, 12, 6), bar(F + 24, 0, 6, 0, 'ring', 5.6)],
+    fx: [...fxEnd(), { type: 'confetti', x: F + 24, z: 0 }], aimFront: true,
+  }), 'arena'],
+  ['doubleb', 'Twin B-stages', 'end', (lv) => ({
+    cfg: { ...END },
+    // a walkway to each side of the floor, each to its own small stage
+    stages: [deckBetween(F + 1, -6, 2, -9, 2.2, 1.4), deck(4.5, -9, 6, 6, 1.4), deckBetween(F + 1, 6, 2, 9, 2.2, 1.4), deck(4.5, 9, 6, 6, 1.4)],
+    trusses: [...rowsEnd(lv), square(4.5, -9, 3.6, 10.5), square(4.5, 9, 3.6, 10.5)],
+    screens: [-9, 9].flatMap((z) => cube(4.5, z, 7.4, 2.2)),
+    speakers: mainsEnd(), barricades: [bar(F + 2.5, 0, 12), bar(4.5, -9, 6, 0, 'ring', 4.6), bar(4.5, 9, 6, 0, 'ring', 4.6)],
+    fx: [...fxEnd(), { type: 'confetti', x: 4.5, z: -9 }, { type: 'confetti', x: 4.5, z: 9 }], aimFront: true,
+  }), 'arena'],
+  ['halo', 'The halo', 'end', (lv) => ({
+    cfg: { ...END, catwalk: 'standard', bstage: 'circle', screen: 'circle' },
+    // one big ring of truss over the stage, a crown of LED tiles hanging from it
+    trusses: [circle(F - 6, 0, 9, 15.6), across(F - 1.5, 24, 14.8), ...(lv >= 1 ? [circle(F - 6, 0, 12.5, 16.4)] : []), ...(lv >= 2 ? [across(F - 13.5, 22, 16)] : [])],
+    screens: Array.from({ length: 12 }, (_, i) => { const a = (i / 12) * TAU; return panel(F - 6 + Math.cos(a) * 9, Math.sin(a) * 9, 4.4, 1.3, 13.4, a); }),
+    speakers: mainsEnd(), barricades: [bar(F + 2.5, 0, 28)], fx: fxEnd(), aimFront: true,
+  }), 'arena'],
+  ['pyramid', 'Pyramid', 'end', (lv) => ({
+    cfg: { ...END, catwalk: 'standard', bstage: 'square' },
+    // a stepped pyramid of decks for the band, two screens leaning in to a point over it
+    stages: [deck(F - 5, 0, 12, 14, 2.6), deck(F - 6.5, 0, 8, 9, 3.4), deck(F - 7.5, 0, 4.5, 5, 4.2)],
+    trusses: [diag(F - 13, 0, F - 2, -13, 15.8), diag(F - 13, 0, F - 2, 13, 15.8), across(F - 2, 26, 15.2), ...(lv >= 1 ? [across(F - 8, 18, 16.2)] : []), ...(lv >= 2 ? [diag(F - 15, 0, F - 4, -14, 16.8), diag(F - 15, 0, F - 4, 14, 16.8)] : [])],
+    screens: [panel(F - 10.5, -6.5, 9, 9, 4.6, 0.55), panel(F - 10.5, 6.5, 9, 9, 4.6, -0.55)],
+    speakers: mainsEnd(), barricades: [bar(F + 2.5, 0, 28)], fx: [...fxEnd(), { type: 'pyro', x: F - 7.5, z: 0 }],
+  }), 'arena'],
+  ['boxset', 'The box', 'end', (lv) => ({
+    cfg: { ...END, catwalk: 'standard', bstage: 'circle' },
+    // the band inside a box of LED: walls left and right, a header across the top
+    trusses: [across(F - 2, 26, 15.4), across(F - 13, 26, 15.4), runX(F - 7.5, -13, 11, 15.4), runX(F - 7.5, 13, 11, 15.4), ...(lv >= 1 ? [across(F - 7.5, 26, 15.8)] : []), ...(lv >= 2 ? [runX(F - 7.5, -6.5, 11, 15.8), runX(F - 7.5, 6.5, 11, 15.8)] : [])],
+    screens: [panel(F - 7.5, -12.6, 10, 9, 3, PI / 2), panel(F - 7.5, 12.6, 10, 9, 3, -PI / 2), panel(F - 2.4, 0, 24, 2.4, 12.2, 0)],
+    speakers: mainsEnd(), barricades: [bar(F + 2.5, 0, 28)], fx: fxEnd(),
+  }), 'arena'],
+  ['corners', 'Corner towers', 'end', (lv) => ({
+    cfg: { ...END, catwalk: 'standard', bstage: 'circle' },
+    // four towers of light at the stage's corners, two little side stages in front of them
+    stages: [deck(F + 2, -13, 4, 4, 1.4), deck(F + 2, 13, 4, 4, 1.4)],
+    trusses: [...rowsEnd(lv), square(F - 1, -14.5, 2.2, 12), square(F - 1, 14.5, 2.2, 12), square(F - 12, -14.5, 2.2, 13), square(F - 12, 14.5, 2.2, 13)],
+    screens: [panel(F - 1, -14.5, 3, 6, 4, 0.2), panel(F - 1, 14.5, 3, 6, 4, -0.2)],
+    speakers: mainsEnd(), barricades: [bar(F + 4.5, -13, 5), bar(F + 4.5, 13, 5), bar(F + 2.5, 0, 18)], fx: [...fxEnd(), { type: 'flame', x: F + 2, z: -13 }, { type: 'flame', x: F + 2, z: 13 }], aimFront: true,
+  }), 'arena'],
+  ['starround', 'Star runways', 'round', (lv) => ({
+    cfg: { ...ROUND }, ring: true,
+    // five runways out from the round stage, a point of the star toward every part of the floor
+    stages: [0, 1, 2, 3, 4].map((i) => { const a = (i / 5) * TAU + PI / 10, w = 6 + 6 * Math.abs(Math.cos(a)); return deck(Math.cos(a) * (8 + w / 2), Math.sin(a) * (8 + w / 2) * 0.72, w, 2.2, 1.4, a); }),
+    trusses: [circle(0, 0, 10, 11), ...(lv >= 1 ? [circle(0, 0, 14.5, 12)] : []), ...(lv >= 2 ? [circle(0, 0, 18.5, 13)] : [])],
+    screens: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => { const a = (i / 8) * TAU; return panel(Math.cos(a) * 8.6, Math.sin(a) * 8.6, 4.2, 2.6, 9.2, a); }),
+    speakers: [0, 1, 2, 3].map((i) => { const a = (i / 4) * TAU + PI / 4; return hang(Math.cos(a) * 12.5, Math.sin(a) * 12.5, 11.2, a); }),
+    barricades: [bar(0, 0, 6, 0, 'ring', 10.4)],
+    fx: [0, 1, 2, 3, 4].map((i) => { const a = (i / 5) * TAU + PI / 10, w = 6 + 6 * Math.abs(Math.cos(a)); return { type: 'confetti', x: r2(Math.cos(a) * (8 + w)), z: r2(Math.sin(a) * (8 + w) * 0.72) }; }),
+  }), 'arena'],
+
+  // --- the stadium's own: open air, a pitch to fill, the show built big ------------------------------
+  ['megawall', 'Mega wall', 'end', (lv) => ({
+    cfg: { ...END },
+    // one enormous LED wall across the back, towers of light at its ends, IMAG on the wings
+    trusses: [across(F - 2, 34, 16), across(F - 9, 32, 16.4), square(F - 4, -19, 2.6, 15), square(F - 4, 19, 2.6, 15), ...(lv >= 1 ? [across(F - 14, 30, 16.8)] : []), ...(lv >= 2 ? [across(F + 1.5, 30, 15)] : [])],
+    screens: [panel(F - 12.5, 0, 34, 11, 3.2, 0), panel(F - 3, -21.5, 6, 9, 4, 0.35), panel(F - 3, 21.5, 6, 9, 4, -0.35)],
+    speakers: [hang(F + 1, -24, 15.5, 0.25), hang(F + 1, 24, 15.5, -0.25), sub(F - 0.5, -6, 2), sub(F - 0.5, 6, 2)],
+    barricades: [bar(F + 2.8, 0, 40)], fx: [...fxEnd(), ...[-17, 17].map((z) => ({ type: 'flame', x: F + 1, z }))], aimFront: true,
+  }), 'stadium'],
+  ['eras', 'Runway to the diamond', 'end', (lv) => ({
+    cfg: { ...END, catwalk: 'long', bstage: 'x' },
+    // the long runway down the pitch, a diamond stage halfway, the X at the end, lights along it all
+    stages: [deck(F + 13, 0, 5, 5, 1.5, PI / 4), deck(F + 13, -4.2, 3.6, 2.4, 1.5), deck(F + 13, 4.2, 3.6, 2.4, 1.5)],
+    trusses: [...rowsEnd(lv), runX(F + 13, -4.5, 22, 10.5), runX(F + 13, 4.5, 22, 10.5), ...(lv >= 1 ? [square(F + 13, 0, 4.6, 11.2)] : [])],
+    screens: [panel(F - 1.5, -17, 4, 8, 4, 0.2), panel(F - 1.5, 17, 4, 8, 4, -0.2), panel(F + 13, -6.4, 7, 1, 0.3, -PI / 2), panel(F + 13, 6.4, 7, 1, 0.3, PI / 2)],
+    speakers: mainsEnd(), barricades: [bar(F + 2.5, -9, 10), bar(F + 2.5, 9, 10), bar(F + 13, 0, 6, 0, 'ring', 5.4)],
+    fx: [...fxEnd(), ...[-2.6, 2.6].map((z) => ({ type: 'flame', x: F + 13, z }))], aimFront: true,
+  }), 'stadium'],
+  ['twinstage', 'Two stages', 'end', (lv) => ({
+    cfg: { ...END, catwalk: 'standard', bstage: 'none' },
+    // the main stage, and a second one out at the far end of the pitch facing it: the crowd between
+    stages: [deck(F + 40, 0, 8, 14, 1.8)],
+    trusses: [...rowsEnd(lv), along(F + 38.5, 0, 16, 11), along(F + 42, 0, 16, 11.4)],
+    screens: [panel(F + 43.6, 0, 10, 4.5, 3.4, PI), panel(F + 40, -8.6, 4, 3, 3.4, PI + 0.4), panel(F + 40, 8.6, 4, 3, 3.4, PI - 0.4)],
+    speakers: [...mainsEnd(), hang(F + 37, -8.5, 9, PI - 0.15), hang(F + 37, 8.5, 9, PI + 0.15)],
+    barricades: [bar(F + 2.5, 0, 28), bar(F + 35.5, 0, 16)], fx: [...fxEnd(), ...[-5, 5].map((z) => ({ type: 'confetti', x: F + 37, z }))], aimFront: true,
+  }), 'stadium'],
+  ['pitchcross', 'Cross the pitch', 'end', (lv) => ({
+    cfg: { ...END, catwalk: 'standard', bstage: 'circle' },
+    // at the B-stage a second runway crosses the floor from one side to the other
+    stages: [deck(F + 16.6, -9, 2.6, 13, 1.5), deck(F + 16.6, 9, 2.6, 13, 1.5), deck(F + 16.6, -16, 4, 4, 1.5), deck(F + 16.6, 16, 4, 4, 1.5)],
+    trusses: [...rowsEnd(lv), along(F + 16.6, 0, 28, 10.8), ...(lv >= 1 ? [square(F + 16.6, -16, 2.6, 10), square(F + 16.6, 16, 2.6, 10)] : [])],
+    speakers: mainsEnd(), barricades: [bar(F + 2.5, 0, 28), bar(F + 16.6, -16, 6, 0, 'ring', 3.4), bar(F + 16.6, 16, 6, 0, 'ring', 3.4)],
+    fx: [...fxEnd(), { type: 'confetti', x: F + 16.6, z: -16 }, { type: 'confetti', x: F + 16.6, z: 16 }], aimFront: true,
+  }), 'stadium'],
+  ['skybridge', 'Light bridges', 'end', (lv) => ({
+    cfg: { ...END, catwalk: 'long', bstage: 'circle' },
+    // bridges of light across the pitch on towers, the runway passing under them
+    trusses: [...rowsEnd(lv), along(F + 10, 0, 30, 12), along(F + 21, 0, 30, 12.6), ...(lv >= 1 ? [along(F + 32, 0, 30, 13.2)] : [])],
+    screens: [panel(F + 10.6, 0, 12, 1.4, 10.4, 0), panel(F + 21.6, 0, 12, 1.4, 11, 0)],
+    speakers: mainsEnd(), barricades: [bar(F + 2.5, -9, 10), bar(F + 2.5, 9, 10)], fx: fxEnd(), aimFront: true,
+  }), 'stadium'],
+  ['spaceship', 'The mothership', 'round', (lv) => ({
+    cfg: { ...ROUND }, ring: true,
+    // a round stage under rings of truss on towers, sixteen screens round the middle
+    stages: [deck(16.5, 0, 15, 2.4, 1.4), deck(-16.5, 0, 15, 2.4, 1.4)],
+    trusses: [circle(0, 0, 10, 11.5), circle(0, 0, 15.5, 13), ...(lv >= 1 ? [circle(0, 0, 19, 14)] : []), ...(lv >= 2 ? [circle(0, 0, 6.5, 10.5)] : [])],
+    screens: Array.from({ length: 16 }, (_, i) => { const a = (i / 16) * TAU; return panel(Math.cos(a) * 12.6, Math.sin(a) * 12.6, 4.6, 2.2, 8, a); }),
+    speakers: [0, 1, 2, 3].map((i) => { const a = (i / 4) * TAU + PI / 4; return hang(Math.cos(a) * 13.5, Math.sin(a) * 13.5, 11.8, a); }),
+    barricades: [bar(0, 0, 6, 0, 'ring', 10.4)], fx: [[24, 0], [-24, 0]].map(([x, z]) => ({ type: 'confetti', x, z })),
+  }), 'stadium'],
+  ['fourway', 'Four-way stage', 'round', (lv) => ({
+    cfg: { ...ROUND, middleShape: 'square' }, ring: true,
+    // a square stage in the middle with a runway off every side, all the way out to the stands
+    stages: [0, PI / 2, PI, -PI / 2].map((a) => deck(Math.cos(a) * 17, Math.sin(a) * 12.5, a % PI ? 9 : 18, 2.4, 1.4, a)),
+    trusses: [square(0, 0, 10.5, 11), ...(lv >= 1 ? [square(0, 0, 15, 12.5)] : []), ...(lv >= 2 ? [square(0, 0, 6.5, 10)] : [])],
+    screens: [0, PI / 2, PI, -PI / 2].map((a) => panel(Math.cos(a) * 7.6, Math.sin(a) * 7.6, 11, 3.2, 8.6, a)),
+    speakers: [0, 1, 2, 3].map((i) => { const a = (i / 4) * TAU + PI / 4; return hang(Math.cos(a) * 14, Math.sin(a) * 12, 11.5, a); }),
+    barricades: [bar(0, 0, 6, 0, 'ring', 10.6)], fx: [0, PI / 2, PI, -PI / 2].map((a) => ({ type: 'pyro', x: r2(Math.cos(a) * 26), z: r2(Math.sin(a) * 14) })),
+  }), 'stadium'],
 ];
+// the concepts a venue offers: the arena's list, or the open-air one (the stadium, the cricket
+// ground, the festival field); `where` is the 5th field ('arena' | 'stadium', shared when left out)
+export const OPEN_AIR = VENUE !== 'arena';
+export function conceptsFor(venue = VENUE) {
+  const open = venue !== 'arena';
+  return CONCEPTS.filter((c) => !c[4] || c[4] === (open ? 'stadium' : 'arena'));
+}
 // a deck from one point to another (its long side along the way), at a width and height
 function deckBetween(x0, z0, x1, z1, d, h) { return deck((x0 + x1) / 2, (z0 + z1) / 2, Math.hypot(x1 - x0, z1 - z0), d, h, Math.atan2(z1 - z0, x1 - x0)); }
 // four panels round a point, each facing out: a cube of screens (its bottom at y)
@@ -241,21 +390,55 @@ export const SCREEN_ADDONS = [
   ['petals', 'Petals', 'round', () => Array.from({ length: 8 }, (_, i) => { const a = (i / 8) * TAU; return panel(Math.cos(a) * 9.6, Math.sin(a) * 9.6, 4.6, 3.4, 7.8, a + 0.5); })],
 ];
 
+// --- fitting a concept to the venue it hangs in ------------------------------------------------------------
+// The arena is the drawing board (identity). Elsewhere an end-stage design scales out from this
+// venue's deck front by its runway's length over the arena's, a round one from the middle by its
+// centre stage's radius; heights scale with it (decks stay a human height). In the open air any
+// truss that is not over the stage stands on its own towers.
+const ARENA_CAT = 14, ARENA_CENTRE = 8.4;
+function frameFor(kind, venue = VENUE) {
+  if (venue === 'arena' || !Number.isFinite(SPEC.catStd)) return null;
+  const end = kind !== 'round', k = end ? SPEC.catStd / ARENA_CAT : SPEC.centreR / ARENA_CENTRE;
+  return { end, k, front: SPEC.downstageX, roofFront: SPEC.stageRoofFront ?? SPEC.downstageX + 7 };
+}
+function fit(parts, fr) {
+  if (!fr) return parts;
+  const X = (x) => r2(fr.end ? fr.front + (x - FRONT) * fr.k : x * fr.k), Z = (z) => r2(z * fr.k), L = (v) => r2((v || 0) * fr.k);
+  const pos = (o) => ({ ...o, x: X(o.x), z: Z(o.z) });
+  // the furthest a truss reaches toward the crowd: past the stage roof's front, it stands on towers
+  const reach = (q) => (q.shape === 'straight' || !q.shape ? q.x + Math.abs(Math.cos(q.rot || 0)) * q.len / 2 : q.x + q.r);
+  return {
+    trusses: parts.trusses.map((t) => { const q = { ...pos(t), len: L(t.len), r: L(t.r), y: r2(t.y * fr.k) }; if (!fr.end || reach(q) > fr.roofFront + 0.5) q.legs = true; return q; }),
+    stages: parts.stages.map((d) => ({ ...pos(d), w: L(d.w), d: L(d.d) })),
+    screens: parts.screens.map((s) => ({ ...pos(s), w: L(s.w), h: L(s.h), y: r2(s.y * fr.k) })),
+    speakers: parts.speakers.map((s) => ({ ...pos(s), y: s.type === 'sub' ? s.y : r2(s.y * fr.k) })),
+    barricades: parts.barricades.map((b) => ({ ...pos(b), len: L(b.len), r: L(b.r) })),
+    fx: parts.fx.map(pos),
+  };
+}
+
 // --- a whole plan: the concept, the rig style, the screen add-ons ------------------------------------------
-export function makePlan(conceptId, styleId = 'standard', addons = []) {
+// -> { cfg, plan (fitted to this venue), unit (the same plan in arena metres, for the previews), kind }
+export function makePlan(conceptId, styleId = 'standard', addons = [], { venue = VENUE } = {}) {
   const C = CONCEPTS.find((c) => c[0] === conceptId) || CONCEPTS[0];
   const S = (RIG_STYLES.find((s) => s[0] === styleId) || RIG_STYLES[0])[2];
   const p = C[3](S.level);
   const kind = C[2];
   const screens = [...(p.screens || []), ...SCREEN_ADDONS.filter((a) => addons.includes(a[0]) && (a[2] === 'any' || a[2] === kind)).flatMap((a) => a[3]())];
-  const trusses = p.trusses || [];
-  return {
-    cfg: p.cfg,
-    plan: {
-      name: `${C[1]} · ${styleId} · ${addons.join('+') || 'no add-ons'}`, version: 2, ring: !!p.ring,
-      trusses, fixtures: trusses.flatMap((t, i) => fill(t, i % 2 && S.mix.length > 2 ? [...S.mix.slice(1), S.mix[0]] : S.mix)),
-      fx: p.fx || [], speakers: p.speakers || [], barricades: p.barricades || [], stages: p.stages || [], screens,
-    },
-    kind,
+  const unitParts = { trusses: p.trusses || [], stages: p.stages || [], screens, speakers: p.speakers || [], barricades: p.barricades || [], fx: p.fx || [] };
+  // the lights go on after the fit, so they keep their real spacing whatever the venue
+  const lights = (trusses) => {
+    const fx = trusses.flatMap((t, i) => fill(t, i % 2 && S.mix.length > 2 ? [...S.mix.slice(1), S.mix[0]] : S.mix, S.every));
+    if (p.aimFront) for (const f of fx) f.aim = null;   // an end stage's rings play to the front, not the stands behind
+    return fx;
   };
+  const fr = frameFor(kind, venue);
+  // the frame rides on the plan, so the rig moves its always-built main screens with it (rig.js);
+  // the arena's round designs still need theirs: the middle screens centre over the round stage
+  const frame = fr ? { kind: fr.end ? 'end' : 'round', front: fr.front, k: fr.k } : kind === 'round' ? { kind: 'round', front: FRONT, k: 1 } : null;
+  const make = (parts, f) => ({
+    name: `${C[1]} · ${styleId} · ${addons.join('+') || 'no add-ons'}`, version: 2, ring: !!p.ring, venue, frame: f,
+    ...parts, fixtures: lights(parts.trusses),
+  });
+  return { cfg: p.cfg, plan: make(fit(unitParts, fr), frame), unit: fr ? make(unitParts, null) : null, kind };
 }

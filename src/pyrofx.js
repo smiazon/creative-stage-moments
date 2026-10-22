@@ -289,6 +289,10 @@ function makeFlames(customPoints) {
       uColorA: { value: new THREE.Color(3.4, 2.2, 0.9) },   // hot core (blooms)
       uColorB: { value: new THREE.Color(0.9, 0.25, 0.04) }, // tips (under gate)
       uRainbow: { value: 0 },
+      // per-nozzle gates (setFlameNozzles): unused (0) until something picks nozzles
+      uNozUse: { value: 0 },
+      uNozOn: { value: new Float32Array(32).fill(-2000) },
+      uNozOff: { value: new Float32Array(32).fill(-1999) },
     },
     transparent: true, blending: THREE.AdditiveBlending,
     depthWrite: false, depthTest: true, side: THREE.DoubleSide,
@@ -296,6 +300,7 @@ function makeFlames(customPoints) {
       attribute vec3 aOrigin; attribute float aSeed; attribute float aNSeed;
       uniform float uT; uniform float uOnT; uniform float uOffT;
       uniform vec3 uColorA; uniform vec3 uColorB; uniform float uRainbow;
+      uniform float uNozUse; uniform float uNozOn[32]; uniform float uNozOff[32];
       varying float vAlive; varying float vMix; varying float vEnv; varying vec2 vUv;
       varying vec3 vColA; varying vec3 vColB;
       ${GLSL_HASH}
@@ -310,6 +315,12 @@ function makeFlames(customPoints) {
         float offE = mix(1.0, 1.0 - smoothstep(uOffT, uOffT + 0.35, uT),
                          step(uOnT, uOffT));
         float env = onE * offE;
+        // this nozzle's own gate, the same ramps (aNSeed = index * 3.77 + 0.9)
+        if (uNozUse > 0.5) {
+          int ni = int(mod(floor((aNSeed - 0.9) / 3.77 + 0.5), 32.0));
+          float a = uNozOn[ni], b = uNozOff[ni];
+          env *= smoothstep(a, a + 0.18, uT) * mix(1.0, 1.0 - smoothstep(b, b + 0.35, uT), step(a, b));
+        }
         // per-nozzle micro-burst: spiky pseudo-random surge
         float mb = sin(uT * 5.1 + aNSeed * 17.0) * sin(uT * 2.27 + aNSeed * 29.0);
         float burst = 0.55 + 0.45 * smoothstep(-0.1, 0.8, mb);
@@ -356,7 +367,7 @@ function makeFlames(customPoints) {
       }`,
   });
 
-  return { mesh: makeMesh(inst, mat), mat };
+  return { mesh: makeMesh(inst, mat), mat, n: NOZZLES };
 }
 
 // --- the 6 popper / streamer launch points ----------------------------------
@@ -618,11 +629,14 @@ export function initPyro(parent, points) {
   const VOLLEY_LIFE = 3.6;
   let volleyEnd = -1;                                   // T when current volley dies
   let nextGap = 0;
+  const noz = new Array(32).fill(true);                 // setFlameNozzles: each nozzle lit or not
+  let nozAll = false;                                   // back to every nozzle at the next on
 
-  const fireVolley = (frac) => {
+  // look (optional, this volley only): { type, pal } in place of the preset's (see uForceType/uForcePal)
+  const fireVolley = (frac, look) => {
     const P = PYRO_PRESETS[state.pyroPreset] || PYRO_PRESETS.classic;
-    pyro.mat.uniforms.uForceType.value = P[0];
-    pyro.mat.uniforms.uForcePal.value = P[1];
+    pyro.mat.uniforms.uForceType.value = look?.type ?? P[0];
+    pyro.mat.uniforms.uForcePal.value = look?.pal ?? P[1];
     pyro.mat.uniforms.uT0.value = T;
     pyro.mat.uniforms.uVSeed.value = Math.random() * 100;
     pyro.mat.uniforms.uFrac.value = frac ?? P[2];
@@ -638,8 +652,9 @@ export function initPyro(parent, points) {
       state.pyro = !!on;
       if (on && T > volleyEnd) fireVolley();
     },
-    firePyro() {
-      fireVolley(1.0);                                  // big all-points volley
+    // big all-points volley; or frac (0..1) of the points, and a look of its own (fireVolley)
+    firePyro(frac, look) {
+      fireVolley(typeof frac === 'number' ? Math.max(0, Math.min(1, frac)) : 1.0, look);
     },
     setPyroPreset(key) {
       if (!(key in PYRO_PRESETS)) return;
@@ -650,10 +665,37 @@ export function initPyro(parent, points) {
     setFlames(on) {
       on = !!on;
       if (on === state.flames) return;
+      if (on && nozAll) { flames.mat.uniforms.uNozUse.value = 0; nozAll = false; }   // back to every nozzle
       state.flames = on;
-      if (on) flames.mat.uniforms.uOnT.value = T;
-      else flames.mat.uniforms.uOffT.value = T;
+      const u = flames.mat.uniforms;
+      // off and on again in the same frame: the off is undone (equal times used to read as off)
+      if (on) { if (u.uOffT.value === T) u.uOffT.value = u.uOnT.value - 1; else u.uOnT.value = T; }
+      else if (u.uOnT.value === T) { u.uOnT.value = -2000; u.uOffT.value = -1999; } else u.uOffT.value = T;
     },
+    // which nozzles burn while the flames are on: a list of indices (0 .. flameCount-1; [] = none),
+    // each lighting or going out with the usual ramps, so a list changed in steps is a chase.
+    // null: every nozzle again (the default; when the flames are off it waits for their next on)
+    setFlameNozzles(list) {
+      const u = flames.mat.uniforms, on = u.uNozOn.value, off = u.uNozOff.value;
+      if (!list) {
+        if (!u.uNozUse.value) return;
+        if (!state.flames) { nozAll = true; return; }
+        for (let i = 0; i < 32; i++) if (!noz[i]) { noz[i] = true; if (off[i] === Math.fround(T)) off[i] = -3000; else on[i] = T; }
+        return;
+      }
+      nozAll = false;
+      if (!u.uNozUse.value) {   // first pick: start from what shows now (all burning, or all out)
+        u.uNozUse.value = 1;
+        noz.fill(state.flames);
+        on.fill(-2000); off.fill(state.flames ? -3000 : -1999);
+      }
+      const want = new Set(list.map((i) => (((i | 0) % 32) + 32) % 32)), t = Math.fround(T);
+      for (let i = 0; i < 32; i++) {   // (out and lit again in the same frame: the out is undone, and the other way round)
+        if (want.has(i) && !noz[i]) { noz[i] = true; if (off[i] === t) off[i] = -3000; else on[i] = T; }
+        else if (!want.has(i) && noz[i]) { noz[i] = false; if (on[i] === t) { on[i] = -2000; off[i] = -1999; } else off[i] = T; }
+      }
+    },
+    get flameCount() { return flames.n; },
     setFlameMode(mode) {
       if (!(mode in FLAME_MODES)) return;
       state.flameMode = mode;

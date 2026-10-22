@@ -39,7 +39,7 @@ export function initSpectacle(scene) {
   // the show flies just in front of the stage (every view of the stage sees it; the centre-hung
   // jumbotron would hide it from half the room further out)
   const JUMBO = VENUE === 'arena' ? { x0: -8.4, x1: 8.4, y0: 12.4, y1: 28.5, z: 5.8 } : null;   // the centre-hung board's box
-  const D = { on: false, shape: null, colour: null, t: 0, landing: false, centre: new THREE.Vector3(front + 3, Math.min(20, roof - 16), 0), size: 7.5 };
+  const D = { on: false, shape: null, colour: null, t: 0, landing: false, count: DN, centre: new THREE.Vector3(front + 3, Math.min(20, roof - 16), 0), size: 7.5 };
   const tmpM = new THREE.Matrix4(), tmpC = new THREE.Color(), tmpV = new THREE.Vector3();
   // the formations (droneshapes.js, shared with the tiles): drone i's spot as [u, v, w], u across
   // as the crowd sees it, v up, w out toward the crowd
@@ -51,9 +51,12 @@ export function initSpectacle(scene) {
     rainbow: () => (i, t, p) => `hsl(${Math.round(((p[0] + p[1]) * 90 + t * 60) % 360)},100%,55%)`,
     twinkle: (pal) => (i, t) => (Math.sin(i * 12.9898 + t * 6) > 0.92 ? '#ffffff' : pal[i % pal.length]),
   };
-  function droneShow({ shape = 'ring', word = null, colour = 'split', pal = ['#ff2bd6', '#00e5ff'] } = {}) {
+  // count: how many fly (1..360; all of them when not given). The rest stay on their pads, out of
+  // sight, and the formation is worked out for the ones that fly, so the shape stays whole
+  function droneShow({ shape = 'ring', word = null, colour = 'split', pal = ['#ff2bd6', '#00e5ff'], count = DN } = {}) {
     if (!D.on) { D.on = true; drones.visible = true; for (let i = 0; i < DN; i++) dPos[i].copy(dPad[i]); }
     D.landing = false;
+    D.count = Math.max(1, Math.min(DN, Math.round(count) || DN));
     D.shape = shapeOf({ shape, word });
     D.colour = (COLOURS[colour] || COLOURS.split)(pal);
   }
@@ -62,11 +65,14 @@ export function initSpectacle(scene) {
     if (!D.on) return;
     D.t += dt;
     let parked = 0;
+    const n = D.count;
     for (let i = 0; i < DN; i++) {
       let target, p;
-      if (D.landing) target = dPad[i];
+      const flies = !D.landing && i < n;   // past the count: back to its pad, then out of sight
+      if (!flies) target = dPad[i];
       else {
-        p = D.shape(i, DN, D.t);
+        p = D.shape(i, n, D.t);
+        if (!(Number.isFinite(p[0]) && Number.isFinite(p[1]) && Number.isFinite(p[2]))) p = D.shape(i, Math.max(n, 25), D.t);   // a grid or wave of very few
         // u runs right as the crowd sees it (-z: they face the stage), w out toward them (+x)
         target = tmpV.set(D.centre.x + p[2] * D.size, D.centre.y + p[1] * D.size, D.centre.z - p[0] * D.size);
         // never through the jumbotron (the arena's, over the centre): under it instead
@@ -75,10 +81,11 @@ export function initSpectacle(scene) {
       const pos = dPos[i], gap = target.distanceTo(pos), step = Math.min(gap, dt * 7 * dLag[i] + gap * Math.min(1, dt * 1.6 * dLag[i]));
       if (gap > 1e-4) pos.lerp(target, step / gap);
       if (D.landing && gap < 0.05) parked++;
-      tmpM.makeTranslation(pos.x, pos.y + (D.landing ? 0 : Math.sin(D.t * 2 + i) * 0.04), pos.z);
+      if (i >= n && gap < 0.05) tmpM.makeScale(0, 0, 0);   // a spare, on its pad: not drawn
+      else tmpM.makeTranslation(pos.x, pos.y + (flies ? Math.sin(D.t * 2 + i) * 0.04 : 0), pos.z);
       drones.setMatrixAt(i, tmpM);
-      tmpC.set(D.landing ? '#ffffff' : D.colour(i, D.t, p || [0, 0, 0]));
-      tmpC.multiplyScalar(D.landing ? 0.6 : 2.2);   // bright: the bloom makes them glow
+      tmpC.set(flies ? D.colour(i, D.t, p || [0, 0, 0]) : '#ffffff');
+      tmpC.multiplyScalar(flies ? 2.2 : 0.6);   // bright: the bloom makes them glow
       drones.setColorAt(i, tmpC);
     }
     drones.instanceMatrix.needsUpdate = true;

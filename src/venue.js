@@ -204,12 +204,30 @@ const STADIUM = {
     // so behind the goals the 300s stay full and only 4 rows of 400s remain
     swoop: { keep: { '300': 18, '400': 4 }, power: 1.35 },
     parapet: 3.4,                           // wall above the local top row, all the way round
+    // Section 101 straddles the +z touchline's centre, the way the arena's
+    // chart does it. With 40 sections that also centres one on the -x end
+    // behind the stage, so the stairs, the sections and the behind-stage tarps
+    // come out mirror-symmetric left/right. Unphased, the grid started where
+    // the path does and every tarp set sat two sections round towards +z,
+    // leaving the stage-left corner open.
+    sectionsFromCentre: true,
+    // tarps are picked by where each section stands against the actual deck
+    // (bowl.js behindSpans), not by a fixed count of section numbers
+    tarpsByStage: true,
   },
   seatHex: '#c41230',
   // the end stage backs onto the end stand and runs 18 m deep; long runways
   stageBack: -(PITCH.L / 2 + 9.7 - 0.35), downstageX: -40.0, largeFrontX: -31.0, hugeFrontX: -10.0,
   catStd: 24.0, catLong: 40.0, centreR: 13.0, middleSq: 11.0, fohX: 6,
   roofY: 34.0,                       // the show's own ground-support roof grid
+  // the touring end stage round the rig (stage.js stageDressLayout): a 46 m
+  // roof between its towers, scaffold wings out to 36 m either side of the
+  // centre line carrying the IMAG screens and the PA, and the deck trimmed to
+  // that width instead of running wall to wall
+  stageDress: { hw: 36, roofHW: 23, wingH: 27 },
+  // delay towers out on the pitch (production.js): metres from the deck front
+  // to each pair, how far off the centre line each pair stands, and how tall
+  delayTowers: { dist: [52, 78], z: [18, 22], h: 17, default: 2 },
   // open air: four corner pylons outside the bowl, lamp heads at 70 m, each
   // throwing ~145 m to its quadrant of the pitch with a narrow 25-degree cone
   // (a wide cone from that height would floodlight the top rows under it)
@@ -260,12 +278,17 @@ const CRICKET_SPEC = {
     tierColors: { '200': [0xd4a017, 0xc8960f, 0xdcae2a, 0xbf8f0c] },
     // a show tarps the end stand behind the stage, the way stadium tours do
     concreteLift: 1.4, wallTop: 50, defaultBehind: 'medium', parapet: 2.6,
+    // 48 sections: phased from the centre, one is centred behind the stage and
+    // the tarps come out symmetric (see the stadium)
+    sectionsFromCentre: true, tarpsByStage: true,
   },
   seatHex: '#1d4ed8',
   // the end stage backs onto the boundary fence at the far end of the oval
   stageBack: -(OVAL.a - 0.35), downstageX: -(OVAL.a - 20.35), largeFrontX: -(OVAL.a - 30.35), hugeFrontX: -(OVAL.a - 52),
   catStd: 24.0, catLong: 40.0, centreR: 13.0, middleSq: 11.0, fohX: 12,
   roofY: 34.0,
+  stageDress: { hw: 36, roofHW: 23, wingH: 27 },
+  delayTowers: { dist: [52, 78], z: [20, 25], h: 17, default: 2 },
   lightY: 66, shadowFar: 260, spotAngle: 0.46,
   houseLights: cricketTowers(),
   endRigs: [],
@@ -312,6 +335,9 @@ const FESTIVAL_SPEC = {
   stageBack: -(FIELD.a - 0.35), downstageX: -(FIELD.a - 20.35), largeFrontX: -(FIELD.a - 28.35), hugeFrontX: -(FIELD.a - 48),
   catStd: 16.0, catLong: 28.0, centreR: 12.0, middleSq: 10.0, fohX: 18,
   roofY: 30.0,
+  // the same touring stage as the stadium's, a little lower under a 30 m grid;
+  // the field's delay towers are its own (grounds.js), so none here
+  stageDress: { hw: 36, roofHW: 23, wingH: 23 },
   // floodlight towers at the four corners of the field
   lightY: 24, shadowFar: 170, spotAngle: 0.62, towerStyle: 'festival',
   houseLights: [[-30, -FIELD.b - 14, 7000, true, -12, -18], [-30, FIELD.b + 14, 7000, false, -12, 18],

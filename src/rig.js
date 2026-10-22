@@ -48,6 +48,13 @@ export const RIG = {
 };
 
 const SECTION = 0.52;        // 12in box truss
+// a ground-support tower: a heavier box truss standing from the floor up to `top`
+function trussLeg(x, z, top) {
+  const g = boxTruss(top, 0.76, 1.0);
+  g.rotateZ(Math.PI / 2);
+  g.translate(x, top / 2, z);
+  return g;
+}
 
 // shared structural material: everything in a real rig is matte black and
 // only becomes visible where a fixture spills on it. The brushed-alu bake
@@ -100,7 +107,14 @@ export function buildRig(scene, videoEl, plan) {
   // its screen), so the header and its motors would be a truss flown over
   // nothing at the arena's old upstage position — the "random truss".
   const inRound = !!(plan && plan.ring);
-  if (!inRound) structGeos.push(alongZ(RIG.VW_HDR.hz * 2, RIG.VW_HDR.x, RIG.VW_HDR.y));
+  // A plan drawn for a venue (a Build concept: apps/concepts.js) carries its frame: the arena
+  // metres it was drawn in, scaled out from this venue's deck front (end) or the middle (round).
+  // The wall, its header and the main-screen shapes are always built in arena metres, so they
+  // move with the same frame, onto this venue's deck instead of being left out on the floor.
+  const FR = plan && plan.frame && Number.isFinite(plan.frame.k) ? plan.frame : null;
+  const FE = FR && FR.kind === 'end' ? FR : null;
+  const fX = (x) => (FE ? FE.front + (x + 20) * FE.k : x), fK = FE ? FE.k : 1;
+  if (!inRound) structGeos.push(alongZ(RIG.VW_HDR.hz * 2 * fK, fX(RIG.VW_HDR.x), RIG.VW_HDR.y * fK));
 
   if (!P) {
   // vertical torm ladders at the deck corners
@@ -124,8 +138,8 @@ export function buildRig(scene, videoEl, plan) {
   }
   }
   if (!inRound) for (let i = 0; i < 8; i++) {
-    const z = -RIG.VW_HDR.hz + (i / 7) * RIG.VW_HDR.hz * 2;
-    picks.push([RIG.VW_HDR.x, RIG.VW_HDR.y + SECTION, z]);
+    const z = (-RIG.VW_HDR.hz + (i / 7) * RIG.VW_HDR.hz * 2) * fK;
+    picks.push([fX(RIG.VW_HDR.x), RIG.VW_HDR.y * fK + SECTION, z]);
   }
   const heavyPicks = [];   // ring-plan motors: bigger hoists, denser chains
   if (P) {
@@ -163,10 +177,13 @@ export function buildRig(scene, videoEl, plan) {
           g2.rotateY(-(a + Math.PI / 2));
           g2.translate(tx + Math.cos(a) * rad, 0, tz + Math.sin(a) * rad);
           structGeos.push(g2);
+          if (t.legs) continue;
           if (i % pickEvery === 0) {
             (Number.isFinite(t.section) ? heavyPicks : picks).push([tx + Math.cos(a) * rad, ty + sec, tz + Math.sin(a) * rad]);
           }
         }
+        // ground support (open air, nothing overhead to fly from): towers, not chains
+        if (t.legs) for (let i = 0; i < 4; i++) { const a = a0 + (sweep * (i + 0.5)) / 4; structGeos.push(trussLeg(tx + Math.cos(a) * rad, tz + Math.sin(a) * rad, ty + sec)); }
         continue;
       }
       // boxTruss runs along +X; yaw it to the plan's angle. Three's rotateY is
@@ -178,6 +195,10 @@ export function buildRig(scene, videoEl, plan) {
       structGeos.push(g);
       const n = Math.max(2, Math.round(len / 5) + 1);
       const cr = Math.cos(rot), sr = Math.sin(rot);
+      if (t.legs) {   // ground-supported: a tower at each end (and at the quarters of a long run: its middle is often over a runway)
+        for (const o of len > 30 ? [-len / 2, -len / 4, len / 4, len / 2] : [-len / 2, len / 2]) structGeos.push(trussLeg(tx + cr * o, tz + sr * o, ty + SECTION));
+        continue;
+      }
       for (let i = 0; i < n; i++) {
         const o = -len / 2 + (i / (n - 1)) * len;
         picks.push([tx + cr * o, ty + SECTION, tz + sr * o]);
@@ -396,6 +417,15 @@ export function buildRig(scene, videoEl, plan) {
     pivot.add(grp);
     group.add(pivot);
     screenPivots[k] = pivot;
+  }
+  // a framed plan's main screens: the far ones onto this deck, the middle ones over the centre
+  if (FR) for (const [k, pivot] of Object.entries(screenPivots)) {
+    const mid = k === 'cyl' || k === 'mcircle' || k === 'mheart', c = pivot.position;
+    if (FR.kind === 'end' && !mid) c.set(fX(c.x), c.y * FR.k, c.z * FR.k);
+    else if (FR.kind === 'round' && mid) c.set((c.x - MIDX) * FR.k, c.y * FR.k, c.z * FR.k);
+    else continue;
+    pivot.scale.setScalar(FR.k);
+    pivot.userData.base = c.clone();
   }
 
   // ---------------------------------------------------------------------------

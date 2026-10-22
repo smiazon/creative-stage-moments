@@ -46,6 +46,7 @@ import { buildHockeyProps } from './hockeyprops.js';
 import { initSmoke } from './smokefx.js';
 import { buildFOH, initFlag } from './setdressing.js';
 import { buildDelayPA } from './delaypa.js';
+import { initProduction } from './production.js';   // open-air stage dressing, FOH riser + tent, delay towers
 import { initSpectacle } from './spectacle.js';
 import { initSportsRig } from './sportsrig.js';
 import { initHouseFixtures } from './houselights.js';
@@ -229,6 +230,9 @@ if (MOBILE && APP !== 'build' && rigPlan?.name?.includes(' · ')) rigPlan = null
 const showRig = buildRig(scene, document.getElementById('video'), rigPlan);
 showRig.idleTex.wrapS = THREE.RepeatWrapping;   // the sphere stage's halo tiles it four times round
 showRig.idleTex.needsUpdate = true;
+// what buildRig made itself: anything added to the rig's group later (pyro, the CO2 jets) is a
+// passenger, carried over to the new group when another plan is hung (rehangRig)
+let rigOwnKids = new Set(showRig.group.children);
 // A plan remembers the room it was drawn against; boot into that room so the
 // stage under the rig is the one the user designed for.
 const planVenue = rigPlan && rigPlan.venue ? rigPlan.venue : null;
@@ -277,6 +281,14 @@ const smokeFX = initSmoke(showRig.group, scene);
 const hockeyProps = buildHockeyProps(scene);
 const foh = buildFOH(scene);
 const delayPA = buildDelayPA(scene);
+// PRODUCTION (production.js): the open-air end stage's wings, IMAG, PA and risers, the FOH riser
+// and tent (the desks go up on it), and the delay towers whose moving heads play the rig. rigFX is
+// built further down, so it is read through a getter; changing the tower count re-lays the
+// concert floor round them (a forced setStageConfig of the same config). No-ops in the arena.
+const production = initProduction(scene, {
+  foh, screenMat: showRig.wallMat, getRigFX: () => rigFX,
+  rebuildFloor: () => { const c = stageCfg; stageCfg = null; setStageConfig(c); },
+});
 // hockey and basketball nights: an oval truss of moving heads over the ice or the court (sportsrig.js)
 const sportsRig = VENUE === 'arena' ? initSportsRig(scene, { roofY: SPEC.roofY }) : null;
 // the roof's LED high-bays, the house lights you see when you look up (houselights.js)
@@ -546,6 +558,7 @@ function setMode(mode) {
   hockeyProps.group.visible = mode === 'hockey';
   foh.group.visible = mode === 'concert' && !['theatre', 'hemicycle'].includes(stageCfg.curtains);
   delayPA.group.visible = mode === 'concert' && !rigPlan?.ring;   // in the round the PA hangs over the middle: no delays
+  production.setVisible(mode === 'concert');   // production.js hides itself for a middle stage (it follows every stage build)
   if (liveCam?.live) requestRemap();   // seat blocks came or went: re-fit the picture
   applyVideoRoute();   // floor projection follows the surface for this mode
 }
@@ -2029,8 +2042,12 @@ function applyRigTransform() {
   const lift = sphereStage ? SPEC.sphere.rigLift : 0;
   for (const g of [showRig.group, rigFX.group]) g.position.y = lift;
   rigFX.offsetY = lift;
-  // pick the live screen for this config
+  // the lasers play to the audience: in front of this deck, or all round a middle stage
   const middle = cfg.position === 'middle';
+  rigFX.inRound = middle;
+  rigFX.stageFrontX = middle ? null : deriveStage(cfg).frontX;
+  arenaFX.setStageFront?.(middle ? null : deriveStage(cfg).frontX, middle);
+  // pick the live screen for this config
   const want = middle
     ? (cfg.screen === 'circle' ? 'mcircle' : cfg.screen === 'heart' ? 'mheart' : 'cyl')
     : (cfg.screen === 'circle' ? 'fcircle' : cfg.screen === 'heart' ? 'fheart' : 'wall');
@@ -2059,6 +2076,74 @@ function applyRigTransform() {
 // place the default rig on THIS room's deck now: setStageConfig skips its
 // rebuild when the wizard hands back the boot config, so nothing else would
 applyRigTransform();
+
+// Hang another rig plan (null: the house rig) without reloading the page: the Build app's
+// concepts, styles and screens change at once. The rig, its lights engine and the pyro that
+// rides it are rebuilt; everything else keeps its hold on them because the objects stay the
+// same (showRig and rigFX are refilled in place), the screens keep their one video material,
+// and the show that was running carries on: the look, the colours, the levels, the lasers.
+function rehangRig(plan) {
+  plan = plan || null;
+  const video = document.getElementById('video');
+  const keepMats = new Set([showRig.wallMat]);
+  const disposeRig = (root) => root.traverse((o) => {
+    o.geometry?.dispose?.();
+    for (const mt of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) if (!keepMats.has(mt)) mt.dispose?.();
+  });
+  // the running show, read off the old engine
+  const R = rigFX;
+  const keep = {
+    look: R.look, behaviour: R.behaviour, master: R.master, grand: R.grand, rate: R.rate, haze: R.haze, roomHaze: R.roomHaze,
+    gain: { ...R.gain }, beamBudget: R.beamBudget, lasersOn: R.lasersOn, strobeOn: R.strobeOn, blindersOn: R.blindersOn, uv: R.uv,
+    stripMode: R.stripMode, laserColorMode: R.laserColorMode, laserSweep: R.laserSweep, laserRing: R.laserRing, laserPattern: R.laserPattern,
+    laserSpread: R.laserSpread, laserTilt: R.laserTilt, laserPan: R.laserPan, t: R.t,
+  };
+  const keepPer = R.laserPer, colA = R.colorA.clone(), colB = R.colorB.clone();
+  const groupKeep = {};
+  for (const [k, gr] of Object.entries(R.fixGroups || {})) groupKeep[k] = { behaviour: gr.behaviour, color: gr.color ? gr.color.clone() : null, level: gr.level, gobo: gr.gobo };
+  // the old rig out: its passengers (the CO2 jets) are kept to ride the new one
+  const oldGroup = showRig.group, oldFxGroup = R.group;
+  const passengers = oldGroup.children.filter((c) => !rigOwnKids.has(c) && c !== pyroFX.group);
+  oldGroup.parent?.remove(oldGroup);
+  scene.remove(oldFxGroup);
+  // the new rig in, on the same material for its screens
+  const next = buildRig(scene, video, plan);
+  next.group.traverse((o) => {
+    if (o.material === next.wallMat) o.material = showRig.wallMat;
+    else if (Array.isArray(o.material)) o.material = o.material.map((m) => (m === next.wallMat ? showRig.wallMat : m));
+  });
+  next.wallMat.dispose();
+  next.idleTex?.dispose?.();
+  disposeRig(oldGroup);
+  disposeRig(oldFxGroup);
+  Object.assign(showRig, next, { wallMat: showRig.wallMat, idleTex: showRig.idleTex });
+  rigOwnKids = new Set(showRig.group.children);
+  for (const p of passengers) showRig.group.add(p);
+  showRig.group.children[0]?.traverse((c) => c.layers.set(3));   // the truss stays out of the bird's-eye views
+  Object.defineProperties(pyroFX, Object.getOwnPropertyDescriptors(initPyro(showRig.group, showRig.fxPoints)));   // getters too
+  // the lights engine, refilled in place (everything holding rigFX keeps holding it)
+  const fresh = new RigFX(scene, showRig, { showLights: showLights.slice(0, 4), stageSpots: showLights.slice(4) });
+  Object.assign(rigFX, fresh);
+  rigFX.cue(keep.look);
+  Object.assign(rigFX, keep);
+  rigFX.colorA.copy(colA); rigFX.colorB.copy(colB);
+  rigFX.laserPer = plan?.ring ? Math.min(keepPer, 3) : keepPer;
+  for (const [k, g] of Object.entries(groupKeep)) if (rigFX.fixGroups?.[k]) Object.assign(rigFX.fixGroups[k], g);
+  if (MOBILE) rigFX.laserMat.uniforms.uWidthPx.value = 1.7;
+  rigFX.setViewport(camera, window.innerHeight);
+  // the mirror pass skips the new groups, not the dead ones
+  for (const [dead, live] of [[oldGroup, showRig.group], [oldFxGroup, rigFX.group]]) {
+    const ix = mirrorSkip.indexOf(dead);
+    if (ix !== -1) mirrorSkip[ix] = live; else mirrorSkip.push(live);
+  }
+  // kept for the next visit, then the room re-fitted round it
+  rigPlan = plan;
+  try { if (plan) localStorage.setItem('arena-active-rigplan', JSON.stringify(plan)); else localStorage.removeItem('arena-active-rigplan'); } catch (_) { /* private mode */ }
+  applyRigTransform();
+  applyState(false);
+  applyVideoRoute();
+  return showRig;
+}
 
 // Rebuild the stage + concert floor for a new config, then rebind every
 // system that held references into them: screen FX, orb engine, crowd
@@ -3799,6 +3884,7 @@ function animate() {
   arenaFX.update(dt);
   smokeFX.update(dt);
   spectacle?.update(dt);
+  production.update(dt);   // production.js: the delay towers' moving heads follow the rig
   if (sportsRig?.group.visible) sportsRig.update(dt, gameRigState());
   vPresets.update(dt);
   // jumbotron winch. Show height 18.4; RETRACT docks it snugly in the truss
@@ -5784,12 +5870,11 @@ function applyAppMode(mode, { entering = false } = {}) {
     consoleUI.toggle(false);
     if (MOBILE || (entering && tips.willStart())) showPanel.close();   // the tutorial opens it when it gets there; a phone keeps the view clear
     else showPanel.open();
-    if (entering && orbFX.mode !== 'design') showUI.playDemo(showUI.demoList[0].id);   // never an empty room
+    if (entering && orbFX.mode !== 'design') showUI.playDemo(showUI.demoList[0].id);   // the wristbands' first show: Blackout, dark until you pick one
   } else if (entering && !tips.willStart()) {
     if (!directorUI.open) directorUI.toggle(true);
   }
-  // a welcome: the stage cannons throw confetti as you walk in
-  if (entering && !MOBILE) setTimeout(() => rigFX.fireConfetti(), 500);   // not on the phone: the room just opens
+  // every Creative Stage app walks in with no effects on: no welcome confetti, nothing firing
 }
 // the helper's cards: the first time into the room, and the ? in the header
 // every window closed: the tutorial starts on a clear screen
@@ -6165,6 +6250,40 @@ if (RENDER_JOB) {
   })();
 }
 
+// --- the apps' engine ------------------------------------------------------------------------
+// The Light, Moments and Build phone apps drive the room through this one handle; the desktop's
+// Creative Stage hub (hub.js) uses the same one to bring their exported concepts in.
+const eng = {
+  APP, VENUE, THREE, renderer, scene, rigFX, arenaFX, pyroFX, smokeFX, balloonFX, orbFX, bstageFX, fasciaFX, showUI, IS_STADIUM,
+  fireworks: IS_STADIUM ? fireworksFX : null,
+  setVideoPreset, setStageFollow,
+  setScreens: (t) => { autoScreens = t; applyVideoRoute(); },
+  confettiAmount: (v) => { pyroFX.setConfettiDensity(v); arenaFX.setConfettiDensity(v); rigFX.confetti.mesh.material.uniforms.uDensity.value = v; },
+  get spectacle() { return spectacle || (spectacle = initSpectacle(scene)); },
+  rigPlan: () => rigPlan,
+  // the Build app's concepts hang at once: a new rig plan swapped in without a reload
+  rehang: (plan) => rehangRig(plan),
+  // Moments and Build: the room's setup, its house lights, the follow spot, the jumbotron, the views
+  builder: builderUI,
+  setLighting, get lighting() { return lighting; }, get mode() { return currentMode; },
+  followSpot: (target) => {   // on, aimed at a point ([x, y, z]); null: off
+    if (!target) { setFollowSpot(false); return; }
+    followSpot.target.fromArray(target); followSpot.end.fromArray(target);
+    if (!followSpot.on) setFollowSpot(true);
+  },
+  jumbo: (tex) => jumboFeed?.override(tex),
+  views: () => ANGLES.map((a, i) => ({ i, name: (currentMode === 'concert' && a.concert ? a.concert : a).name, pos: (currentMode === 'concert' && a.concert ? a.concert : a).pos })).filter((v) => !ANGLES[v.i].skip),
+  setAngle,
+  production,   // production.js: the Build app's Production tab (towers, FOH tent, wings, PA, risers)
+};
+window.__dbg.eng = eng;
+window.__dbg.production = production;
+
+// --- Creative Stage, the hub (the desktop): the way into the four apps, and their concepts back in --
+if (!MOBILE && !new URLSearchParams(location.search).has('render')) {
+  import('./hub.js').then((m) => { window.__dbg.hub = m.initHub({ eng, overlay, showUI, hint: (t) => padsUI.hint?.(t) }); });
+}
+
 // --- the phone and tablet showcase ---------------------------------------------------------
 if (MOBILE) {
   import('./mobile.js').then((m) => m.initMobile({ camera, view: renderer.domElement, controls, nextAngle, touchMove, menuUI, overlay, closeAll: closeAllWindows, toggleFly, isFlying: () => flying, keys, designer: showUI,
@@ -6173,26 +6292,7 @@ if (MOBILE) {
     // the arena PA (audiofx.js): Auto Show's song can play from its speaker stacks, in the room's acoustics
     renderer,   // Auto Show draws its screens' visuals on the graphics card
     // the Light and FX apps' engine: the rig, the screens, the effects
-    eng: {
-      APP, VENUE, THREE, renderer, scene, rigFX, arenaFX, pyroFX, smokeFX, balloonFX, orbFX, bstageFX, fasciaFX, showUI, IS_STADIUM,
-      fireworks: IS_STADIUM ? fireworksFX : null,
-      setVideoPreset, setStageFollow,
-      setScreens: (t) => { autoScreens = t; applyVideoRoute(); },
-      confettiAmount: (v) => { pyroFX.setConfettiDensity(v); arenaFX.setConfettiDensity(v); rigFX.confetti.mesh.material.uniforms.uDensity.value = v; },
-      get spectacle() { return spectacle || (spectacle = initSpectacle(scene)); },
-      rigPlan: () => rigPlan,
-      // Moments and Build: the room's setup, its house lights, the follow spot, the jumbotron, the views
-      builder: builderUI,
-      setLighting, get lighting() { return lighting; }, get mode() { return currentMode; },
-      followSpot: (target) => {   // on, aimed at a point ([x, y, z]); null: off
-        if (!target) { setFollowSpot(false); return; }
-        followSpot.target.fromArray(target); followSpot.end.fromArray(target);
-        if (!followSpot.on) setFollowSpot(true);
-      },
-      jumbo: (tex) => jumboFeed?.override(tex),
-      views: () => ANGLES.map((a, i) => ({ i, name: (currentMode === 'concert' && a.concert ? a.concert : a).name, pos: (currentMode === 'concert' && a.concert ? a.concert : a).pos })).filter((v) => !ANGLES[v.i].skip),
-      setAngle,
-    },
+    eng,
     pa: { context: () => audioFX.getContext(), attach: (node) => audioFX.attachNode(node), get on() { return venueSound.on; }, set: (v) => venueSound.set(v) },
     bird: { set: setBirdMode, get mode() { return birdMode; } },
     fx: {

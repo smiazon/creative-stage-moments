@@ -15,7 +15,7 @@
 // carves a matching exclusion zone out of the floor crowd and gets barriers.
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { roundedRectPath, aisleU, BOWL_A, BOWL_B, BOWL_R } from './bowl.js';
+import { roundedRectPath, aisleU, setTarpStage, BOWL_A, BOWL_B, BOWL_R } from './bowl.js';
 import { SPEC } from './venue.js';
 import {
   makeBarrierMesh, makeOrbDiscTexture,
@@ -159,6 +159,136 @@ export const FOH_CX = SPEC.fohX;         // pen center, opposite the stage
 const FOH_HD = 3.0;               // half depth (along x) -> 6 m
 const FOH_HW = 4.0;               // half width (along z) -> 8 m
 const FOH_CH = 0.7;               // corner chamfer
+// The scaffold riser production.js can stand in the pen (open air): the desks
+// go up on it and the walker steps up with them. `on` is set by production.js
+// while the riser is actually showing; the stair runs off its back (+x) edge.
+// The x values are for a pen at FOH_CX; `dx` is how far the pen has stepped
+// back for the current stage (fohCenterX).
+export const FOH_RISER = {
+  on: false, h: 0.5, dx: 0,
+  x0: FOH_CX - 2.6, x1: FOH_CX + 1.6, z0: -3.2, z1: 3.2,   // deck
+  stairX1: FOH_CX + 2.55, stairHW: 0.8,                     // stair off the back edge
+};
+
+// --- the open-air touring stage (venue.js stageDress) --------------------------
+// A stadium show's end stage is more than a deck: a ground-support roof
+// (stadium.js), scaffold wings either side carrying the IMAG screens and the
+// PA, band risers, stairs (production.js builds those). Everything is laid
+// out here from the deck the config builds, so the roof, the dressing, the
+// walking surfaces and the trimmed deck can never disagree. Null for rooms
+// without one (the arena), a middle stage or a curtained room.
+const DRESS = SPEC.stageDress || null;
+// production.js's switches: on only once it has built what they describe, so
+// the walking surfaces never climb dressing that is not there
+export const STAGE_DRESS = { wings: false, risers: false };
+// the deck's upstage boundary at lateral z: the bowl's wall, WALL_GAP in
+function deckBackX(z) {
+  const A = BOWL_A - WALL_GAP, Bh = BOWL_B - WALL_GAP, R = BOWL_R - WALL_GAP;
+  const sz = Bh - R, az = Math.abs(z);
+  if (az <= sz) return -A;
+  const dz = Math.min(R, az - sz);
+  return -(A - R) - Math.sqrt(Math.max(0, R * R - dz * dz));
+}
+// the floor's half-width at x: how far out a stair can run before the wall
+function floorHalfZ(x) {
+  const A = BOWL_A - WALL_GAP, Bh = BOWL_B - WALL_GAP, R = BOWL_R - WALL_GAP;
+  const sx = A - R, ax = Math.abs(x);
+  if (ax <= sx) return Bh;
+  const dx = Math.min(R, ax - sx);
+  return Bh - R + Math.sqrt(Math.max(0, R * R - dx * dx));
+}
+const layoutCache = new WeakMap();
+export function stageDressLayout(cfgIn) {
+  if (!DRESS) return null;
+  if (cfgIn && typeof cfgIn === 'object' && layoutCache.has(cfgIn)) return layoutCache.get(cfgIn);
+  const cfg = normalizeStageCfg(cfgIn);
+  let L = null;
+  if (cfg.position === 'far' && cfg.curtains === 'full') {
+    const d = derive(cfg);
+    const F = d.frontX, B = SPEC.stageBack, roofY = SPEC.roofY;
+    const deckHW = Math.min(BOWL_B - WALL_GAP, DRESS.hw);
+    const roofHW = Math.min(DRESS.roofHW, deckHW - 6);
+    // roof towers stand on the deck: a pair upstage, a pair at the lip, and
+    // more between them once the deck is deeper than one 20 m bay. The grid
+    // cantilevers 7 m past the lip, to the roof line apps/concepts.js hangs
+    // its designs from (SPEC.stageRoofFront ?? downstageX + 7).
+    // the upstage scrim stands on the deck's back edge at its own ends (the
+    // deck's back corners curve in with the bowl), the back towers just ahead
+    const scrimX = Math.max(B + 0.9, deckBackX(roofHW + 1.4) + 0.2);
+    const xb = scrimX + 0.9, xf = F - 1.0;
+    const bays = Math.max(1, Math.ceil((xf - xb) / 20));
+    const towerX = Array.from({ length: bays + 1 }, (_, i) => xb + ((xf - xb) * i) / bays);
+    // wings: scaffold blocks from just outside the roof towers to a walkway
+    // short of the deck edge, as deep as the deck allows at their outer edge
+    const z0 = roofHW + 1.4, z1 = deckHW - 1.2;
+    const x1 = F - 1.2;
+    const x0 = Math.min(x1 - 4, Math.max(F - 14, deckBackX(z1) + 0.8, B + 1));
+    const wing = { x0, x1, z0, z1, h: Math.min(DRESS.wingH, roofY - 4) };
+    // band risers either side of the centre lift, clear of the torms
+    const risers = [-1, 1].map((sd) => ({ x: F - 7.6, z: sd * 7.6, w: 3.0, d: 2.6, h: 0.5 }));
+    // stairs off the walkway outside each wing, down to the ground; dropped
+    // where the deck already runs to the wall and there is no floor to land on
+    // (3.4 m of run for the 2 m rise where there is room, steeper to 2.2 m)
+    const sw = 1.6, sx0 = F - 4.8, sx1 = sx0 + sw;
+    const run = Math.min(3.4, Math.min(floorHalfZ(sx0), floorHalfZ(sx1)) - 0.15 - deckHW);
+    const stairs = run >= 2.2
+      ? [-1, 1].map((sd) => ({ s: sd, x0: sx0, x1: sx1, z0: deckHW, z1: deckHW + run })) : [];
+    L = { F, B, deckHW, roofHW, roofY, towerX, roofFront: F + 7, scrimX, wing, risers, stairs };
+  }
+  if (cfgIn && typeof cfgIn === 'object') layoutCache.set(cfgIn, L);
+  return L;
+}
+
+// --- delay towers (production.js builds them) -----------------------------------
+// Where they stand for a config, so the concert floor keeps clear of them and
+// production.js builds them in the same place. A pair at `dist[0]` metres from
+// the deck front, and with four a second pair further back, either side of
+// the centre line; kept on the floor however deep the deck runs.
+const DT = SPEC.delayTowers || null;
+export const DELAY_TOWERS = { count: DT ? (DT.default ?? 2) : 0 };
+export const DELAY_TOWER_CLEAR = 3.2;      // half-size of the square the crowd keeps clear round a base
+export function delayTowerSpots(cfgIn, count = DELAY_TOWERS.count) {
+  if (!DT || !count) return [];
+  const cfg = normalizeStageCfg(cfgIn);
+  if (cfg.position !== 'far' || cfg.curtains !== 'full') return [];
+  const F = derive(cfg).frontX;
+  const pairs = count >= 4 ? 2 : 1;
+  const xMax = BOWL_A - 14;
+  const out = [];
+  for (let k = 0; k < pairs; k++) {
+    const x = Math.min(F + DT.dist[k], xMax - (pairs - 1 - k) * 12);
+    for (const sd of [-1, 1]) out.push({ x, z: sd * DT.z[k], pair: k, side: sd, h: DT.h });
+  }
+  return out;
+}
+
+// --- where the FOH pen stands -----------------------------------------------------
+// Indoors it is fixed (FOH_CX). Open air the runways are long: the stadium's
+// 40 m one puts the B-stage on top of a pen at FOH_CX, and a middle stage
+// covers it outright. So there the pen steps back until it is clear of the
+// B-stage, the runway's end or the middle deck (and the globe's ramp), and
+// never further than the far end's run-off.
+export function fohCenterX(cfgIn) {
+  if (!DRESS) return FOH_CX;
+  const cfg = normalizeStageCfg(cfgIn);
+  let clear = -Infinity;
+  if (cfg.position === 'middle') {
+    clear = cfg.middleShape === 'sphere' ? SPEC.sphere.deckR + 7 : middleRadius(cfg) + PIT;
+  } else {
+    const d = derive(cfg);
+    if (d.hasB) clear = d.bX + d.bBound + PIT;
+    else if (d.hasCat) clear = d.bX + PIT;
+  }
+  return Math.min(BOWL_A - FOH_HD - 8, Math.max(FOH_CX, clear + FOH_HD + 3));
+}
+
+// --- rebuild hooks ----------------------------------------------------------------
+// Modules that dress the deck (the open-air roof, production.js) refit
+// whenever a stage is built, and read the config the last one was built for.
+const builtHooks = new Set();
+let lastCfg = null;
+export function onStageBuilt(fn) { builtHooks.add(fn); return () => builtHooks.delete(fn); }
+export function currentStageCfg() { return lastCfg || normalizeStageCfg({}); }
 
 // --- config helpers -----------------------------------------------------------
 export function normalizeStageCfg(c = {}) {
@@ -247,7 +377,32 @@ export function stageSurfaceY(cfgIn, x, z) {
     if (x >= backX && off <= 0) top = MAIN_H;
     return top;
   }
-  if (x <= d.frontX && x >= backX && Math.abs(z) <= halfW) top = MAIN_H;
+  // the open-air deck is trimmed to the stage and its wings (stageDressLayout)
+  const L = DRESS ? stageDressLayout(cfgIn) : null;
+  if (x <= d.frontX && x >= backX && Math.abs(z) <= (L ? L.deckHW : halfW)) top = MAIN_H;
+  if (L) {
+    if (STAGE_DRESS.risers) {
+      for (const r of L.risers) {
+        if (Math.abs(x - r.x) <= r.w / 2 && Math.abs(z - r.z) <= r.d / 2) top = Math.max(top, MAIN_H + r.h);
+      }
+    }
+    if (STAGE_DRESS.wings) {
+      for (const st of L.stairs) {
+        const lz = z * st.s;
+        if (x >= st.x0 && x <= st.x1 && lz >= st.z0 && lz <= st.z1) {
+          top = Math.max(top, MAIN_H * (1 - (lz - st.z0) / (st.z1 - st.z0)));
+        }
+      }
+    }
+  }
+  // the FOH riser, while production.js has it up
+  if (FOH_RISER.on && Math.abs(z) <= FOH_RISER.z1) {
+    const fx = x - FOH_RISER.dx;
+    if (fx >= FOH_RISER.x0 && fx <= FOH_RISER.x1) top = Math.max(top, FOH_RISER.h);
+    else if (fx > FOH_RISER.x1 && fx <= FOH_RISER.stairX1 && Math.abs(z) <= FOH_RISER.stairHW) {
+      top = Math.max(top, FOH_RISER.h * (1 - (fx - FOH_RISER.x1) / (FOH_RISER.stairX1 - FOH_RISER.x1)));
+    }
+  }
   if (d.hasCat && Math.abs(z) <= CAT_W / 2) {
     if (x > d.frontX && x <= d.rampEnd) top = Math.max(top, MAIN_H + ((x - d.frontX) / RAMP_LEN) * (CAT_H - MAIN_H));
     else if (x > d.rampEnd && x <= d.bX) top = Math.max(top, CAT_H);
@@ -402,9 +557,10 @@ function sampleSegments(segs) {
   return out;
 }
 
-function fohSamples() {
+function fohSamples(cfg) {
   const S2 = Math.SQRT1_2;
-  const x0 = FOH_CX - FOH_HD, x1 = FOH_CX + FOH_HD;
+  const cx = fohCenterX(cfg);
+  const x0 = cx - FOH_HD, x1 = cx + FOH_HD;
   const z0 = -FOH_HW, z1 = FOH_HW;
   const c = FOH_CH;
   return sampleSegments([
@@ -495,8 +651,10 @@ function barrierSamples(cfg) {
       ? sampleSegments([{ arc: [0, Math.PI * 2], r: HYB_R + 0.55, c: [0, 0] }])
       : sampleSegments([{ line: [[HYB_X, halfW - 1.2], [HYB_X, -(halfW - 1.2)]], n: [1, 0] }]);
     // drop fence panels that would land inside another structure's zone
+    const towers = delayTowerSpots(cfg), fohX = fohCenterX(cfg);
     const keep = fence.filter((p) => {
-      if (Math.abs(p.x - FOH_CX) < FOH_HD + 1 && Math.abs(p.z) < FOH_HW + 1) return false;
+      if (Math.abs(p.x - fohX) < FOH_HD + 1 && Math.abs(p.z) < FOH_HW + 1) return false;
+      if (towers.some((t) => Math.abs(p.x - t.x) < DELAY_TOWER_CLEAR && Math.abs(p.z - t.z) < DELAY_TOWER_CLEAR)) return false;
       if (cfg.position === 'far') {
         if (d.hasB && Math.hypot(p.x - d.bX, p.z) < d.bBound + PIT + 0.8) return false;
         if (d.hasCat && Math.abs(p.z) < CAT_W / 2 + PIT + 0.8 && p.x < d.bX + PIT + 1) return false;
@@ -530,9 +688,10 @@ export function buildConcertSeating(scene, cfgIn = {}) {
     return Math.hypot(dx, dz) <= r;
   };
 
+  const fohX = fohCenterX(cfg);
   const blocked = (x, z) => {
     if (!['theatre', 'hemicycle'].includes(cfg.curtains)
-      && Math.abs(x - FOH_CX) < FOH_HD + CLEAR && Math.abs(z) < FOH_HW + CLEAR) return true;
+      && Math.abs(x - fohX) < FOH_HD + CLEAR && Math.abs(z) < FOH_HW + CLEAR) return true;
     if (cfg.position === 'middle') {
       if (cfg.middleShape === 'square') {
         return Math.max(Math.abs(x), Math.abs(z)) < MIDDLE_SQ + PIT + CLEAR;
@@ -569,7 +728,13 @@ export function buildConcertSeating(scene, cfgIn = {}) {
   // room round its delay towers, and thins out from the barrier to the back,
   // where people stand loose rather than packed. Nobody stands on a grid
   // there, so each person is nudged off it.
-  const aisles = SPEC.gaAisles !== false, holes = SPEC.crowdHoles || [];
+  // holes: [x, z, half-size] — the festival's towers (venue.js crowdHoles)
+  // and the delay towers production.js stands on the pitch
+  const aisles = SPEC.gaAisles !== false;
+  const holes = [
+    ...(SPEC.crowdHoles || []).map(([hx, hz]) => [hx, hz, 2.8]),
+    ...delayTowerSpots(cfg).map((t) => [t.x, t.z, DELAY_TOWER_CLEAR]),
+  ];
   const fest = !!SPEC.gaFalloff;
   const rnd = (x, z, k) => { const v = Math.sin(x * 12.9898 + z * 78.233 + k * 37.719) * 43758.5453; return v - Math.floor(v); };
   const dense = (x) => 1 - 0.72 * Math.min(1, Math.max(0, (x - startX) / Math.max(1, BOWL_A - startX))) ** 0.8;
@@ -577,7 +742,7 @@ export function buildConcertSeating(scene, cfgIn = {}) {
     if (aisles && aisleX.some((ax) => Math.abs(x - ax) < 0.95)) continue;
     for (let z = -BOWL_B; z <= BOWL_B; z += SEAT_PITCH) {
       if (aisles && Math.abs(Math.abs(z) - aisleZ) < 0.62) continue;
-      if (holes.some(([hx, hz]) => Math.abs(x - hx) < 2.8 && Math.abs(z - hz) < 2.8)) continue;
+      if (holes.some(([hx, hz, hh]) => Math.abs(x - hx) < hh && Math.abs(z - hz) < hh)) continue;
       if (fest && rnd(x, z, 0) > dense(x)) continue;
       if (blocked(x, z) || !insideFloor(x, z)) continue;
       const zone = zoneOf(x, z);
@@ -976,6 +1141,10 @@ export function buildStage(scene, cfgIn = {}) {
   const cfg = normalizeStageCfg(cfgIn);
   const d = derive(cfg);
   const group = new THREE.Group();
+  lastCfg = cfg;
+  FOH_RISER.dx = fohCenterX(cfg) - FOH_CX;
+  // the behind-stage tarps measure themselves against this deck (bowl.js)
+  setTarpStage(cfg.position === 'far' ? { front: d.frontX } : null);
 
   // One tile per PAIR of 2.44 m ply sheets. At one tile per sheet the mottle
   // and scuff pattern repeated every 2.4 m, which reads as wallpaper on a 40 m
@@ -1046,10 +1215,26 @@ export function buildStage(scene, cfgIn = {}) {
     }
     const path = roundedRectPath(BOWL_A - WALL_GAP, halfW, BOWL_R - WALL_GAP, 256);
     const arc = path.filter((p) => p.x <= frontX);
+    // Open air the deck stops at the stage and its wings (stageDressLayout)
+    // instead of running wall to wall: the outline is the bowl's end clipped
+    // to |z| <= deckHW. In the arena deckHW is the room's own half-width.
+    const LD = DRESS ? stageDressLayout(cfg) : null;
+    const deckHW = LD ? LD.deckHW : halfW;
+    let outline = [[frontX, -halfW], ...arc.map((p) => [p.x, -p.z]), [frontX, halfW]];
+    if (deckHW < halfW - 1e-6) {
+      const clip = (P, keep, lim) => {
+        const out = [];
+        for (let i = 0; i < P.length; i++) {
+          const a = P[i], b = P[(i + 1) % P.length], ia = keep(a), ib = keep(b);
+          if (ia) out.push(a);
+          if (ia !== ib) { const t = (lim - a[1]) / (b[1] - a[1]); out.push([a[0] + (b[0] - a[0]) * t, lim]); }
+        }
+        return out;
+      };
+      outline = clip(clip(outline, (q) => q[1] <= deckHW, deckHW), (q) => q[1] >= -deckHW, -deckHW);
+    }
     const shape = new THREE.Shape();
-    shape.moveTo(frontX, -halfW);
-    for (const p of arc) shape.lineTo(p.x, -p.z);
-    shape.lineTo(frontX, halfW);
+    outline.forEach(([px, py], i) => (i ? shape.lineTo(px, py) : shape.moveTo(px, py)));
     shape.closePath();
     mainGeo = new THREE.ExtrudeGeometry(shape, { depth: MAIN_H, bevelEnabled: false });
     mainGeo.rotateX(-Math.PI / 2);
@@ -1057,7 +1242,7 @@ export function buildStage(scene, cfgIn = {}) {
     deck.castShadow = true;
     deck.receiveShadow = true;
     group.add(deck);
-    const trim = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, halfW * 2), trimMat);
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, deckHW * 2), trimMat);
     trim.position.set(frontX, MAIN_H - 0.04, 0);
     group.add(trim);
     return deck;
@@ -1389,7 +1574,7 @@ export function buildStage(scene, cfgIn = {}) {
   const noFOH = ['theatre', 'hemicycle'].includes(cfg.curtains);
   const spots = noFOH
     ? barrierSamples(cfg)
-    : [...barrierSamples(cfg), ...fohSamples()];
+    : [...barrierSamples(cfg), ...fohSamples(cfg)];
   const { frame, mesh } = barrierPanelGeos();
   const steelMat = new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.5, metalness: 0.7 });
   const meshTex = makeBarrierMesh();
@@ -1413,6 +1598,10 @@ export function buildStage(scene, cfgIn = {}) {
   group.add(frames, meshes);
 
   scene.add(group);
+  // the roof and the production dressing refit to this deck
+  for (const fn of builtHooks) {
+    try { fn(cfg, d); } catch (e) { console.warn('stage rebuild hook failed', e); }
+  }
   return {
     group, cfg, mainDeck,
     bScreen: round.bScreen, bScreenMat: round.bScreenMat,
